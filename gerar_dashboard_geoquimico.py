@@ -330,16 +330,17 @@ def montar_afm(pontos=None):
         mode="lines", line=dict(color="#A63D2F", width=1.4), hoverinfo="skip", showlegend=False,
     ))
     if pontos:
-        xs_a, xs_b, xs_c, cores, textos = [], [], [], [], []
+        xs_a, xs_b, xs_c, cores, textos, ids = [], [], [], [], [], []
         for p in pontos:
             if p.get("afm_a_F") is None:
                 continue
             xs_a.append(p["afm_a_F"]); xs_b.append(p["afm_b_A"]); xs_c.append(p["afm_c_M"])
             cores.append(p["cor"])
             textos.append(p["amostra"] + (f" ({p['ponto_id']})" if p.get("ponto_id") else ""))
+            ids.append(p["id"])
         fig.add_trace(go.Scatterternary(
-            a=xs_a, b=xs_b, c=xs_c, mode="markers", text=textos, hoverinfo="text",
-            marker=dict(size=8, color=cores, line=dict(width=1, color="#1B1F2E")), showlegend=False,
+            a=xs_a, b=xs_b, c=xs_c, mode="markers", text=textos, hoverinfo="text", customdata=ids,
+            name="Amostras Taió", marker=dict(size=8, color=cores, line=dict(width=1, color="#1B1F2E")), showlegend=False,
         ))
     fig.update_layout(
         ternary=dict(
@@ -852,6 +853,36 @@ def main():
         }});
     }});
 
+    // indice (grafico, indice-da-trace, lista-de-ids) de todo grafico que
+    // tem a trace de amostras reais (mesmo "name" usado em todos eles) --
+    // usado pra destacar (aumentar/contornar) o ponto selecionado, e tirar
+    // o destaque de qualquer outro grafico ao trocar de selecao.
+    var GRAFICOS_PONTOS = [];
+    TODOS_GD.forEach(function(gd) {{
+        if (!gd || !gd.data) return;
+        var idx = gd.data.findIndex(function(tr) {{ return tr.name === 'Amostras Taió'; }});
+        if (idx === -1) return;
+        GRAFICOS_PONTOS.push({{ gd: gd, idx: idx, customdata: (gd.data[idx].customdata || []).slice() }});
+    }});
+
+    function atualizarDestaqueGraficos(idSelecionado) {{
+        GRAFICOS_PONTOS.forEach(function(g) {{
+            var n = g.customdata.length;
+            var tamanhos = new Array(n).fill(8);
+            var largurasLinha = new Array(n).fill(1);
+            var coresLinha = new Array(n).fill('#1B1F2E');
+            var pos = g.customdata.indexOf(idSelecionado);
+            if (pos !== -1) {{
+                tamanhos[pos] = 14;
+                largurasLinha[pos] = 3;
+                coresLinha[pos] = '{MARCA_ROXO}';
+            }}
+            Plotly.restyle(g.gd, {{
+                'marker.size': [tamanhos], 'marker.line.width': [largurasLinha], 'marker.line.color': [coresLinha],
+            }}, [g.idx]);
+        }});
+    }}
+
     // tema claro/escuro -- moldura (fundo/eixos/legenda/botoes) muda, cores
     // dos dados (litologia, campos de literatura) ficam fixas.
     var TEMA = {{
@@ -959,6 +990,7 @@ def main():
             linha.classList.add('selecionada');
             if (origemClique !== 'lista') linha.scrollIntoView({{block: 'nearest'}});
         }}
+        atualizarDestaqueGraficos(id);
         var r = DADOS_POR_ID[id];
         if (!r) return;
         if (r.lat !== undefined && r.lon !== undefined) {{
