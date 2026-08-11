@@ -4,14 +4,23 @@ da PMP/Florianopolis -- removida por pedido explicito do usuario; o produto
 PMP vai virar um dashboard SEPARADO, sem afetar este aqui).
 
 Dados: 308 pontos de campo de `pontos_unificados_completo.gpkg` (mesmo
-catalogo unificado usado nos outros 3 produtos), sem geoquimica bruta -- so
-um flag Sim/Nao + classificacao Alto/Baixo-Ti pra ~23 pontos.
+catalogo unificado usado nos outros 3 produtos) + 41 amostras de geoquimica
+bruta resgatadas em `2_Banco_de_Dados/QMC_TAIO_TODOS` (26 de
+afloramento/campo, cruzadas com o ponto de campo por SAMPLE NAME =
+id_original, + 15 de furo na soleira Bela Vista + 3 amostras de referencia
+com nomenclatura ainda a confirmar) -- ver
+`QMC_TAIO_TODOS/Geoquimica_Taio_Cruzada.xlsx` pro cruzamento/analise previa
+completa.
 
-Os diagramas geoquimicos (TAS, AFM, Shand's Index, e 3 campos de magma-tipo
-digitalizados de figura da literatura) mostram SO os campos de referencia,
-sem pontos plotados -- o Taio ainda nao tem oxido/traço bruto de verdade pra
-posicionar amostras neles. Quando existir esse dado, e so adicionar os
-pontos nas mesmas figuras.
+Os diagramas geoquimicos (TAS, AFM, Shand's Index, e 6 campos de magma-tipo
+digitalizados de figura da literatura) agora mostram as 41 amostras reais
+plotadas por cima dos campos de referencia (que continuam aproximados,
+digitalizados a olho -- ver nota em cada figura). Cores: laranja = Alto-Ti,
+azul = Baixo-Ti (mesmo criterio TiO2 >= 2,0% em peso ja usado no
+pontos_unificados.csv, validado sem divergencia contra as 21 amostras em
+comum). O mapa ganhou uma camada extra "Geoquímica (amostras brutas)" com a
+localização de cada amostra (a do furo repete a mesma boca de sondagem, só
+a profundidade muda).
 
 Mapa: Leaflet (tiles reais, zoom/pan continuo) -- mesma tecnica do webmap
 dedicado (gerar_webmap_taio.py), NAO mais Plotly com imagem estatica
@@ -40,8 +49,12 @@ BASE = Path(__file__).parent
 PONTOS_CAMPO_GPKG = (
     BASE.parent.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "pontos_unificados_completo.gpkg"
 )
+GEOQUIMICA_CSV = BASE.parent.parent / "2_Banco_de_Dados" / "QMC_TAIO_TODOS" / "geoquimica_dashboard.csv"
 LOGO_PATH = BASE / "assets" / "logo_gstech.jpg"
 OUT_HTML = BASE / "dashboard_geoquimico.html"
+
+COR_TI_ALTO = "#E67E22"
+COR_TI_BAIXO = "#2E86C1"
 
 # identidade visual GS Tech -- mesma paleta dos outros produtos, manter em sincronia.
 MARCA_ROXO_ESCURO = "#2D0A4A"
@@ -106,6 +119,59 @@ def carregar_campo():
             "descricao": desc,
             "tem_geoquimica": row.geoquimica == "Sim",
             "cor_mapa": CORES_LITOLOGIA_CAMPO.get(row.litologia_padronizada, COR_LITOLOGIA_PADRAO),
+        })
+    return registros
+
+
+# ======================================================================
+# 1b. geoquimica bruta resgatada (QMC_TAIO_TODOS) -- 41 amostras (26 de
+#     afloramento/campo + 15 de furo na soleira + 3 amostras de referencia
+#     de nomenclatura ainda a confirmar), cruzadas com pontos_unificados
+#     por SAMPLE NAME = id_original. Ver
+#     2_Banco_de_Dados/QMC_TAIO_TODOS/Geoquimica_Taio_Cruzada.xlsx pro
+#     detalhamento/analise previa completa.
+# ======================================================================
+PESO_MOLAR = {"Al2O3": 101.96, "CaO": 56.08, "Na2O": 61.98, "K2O": 94.20}
+
+
+def carregar_geoquimica():
+    if not GEOQUIMICA_CSV.exists():
+        return []
+    df = pd.read_csv(GEOQUIMICA_CSV)
+    registros = []
+    for row in df.itertuples():
+        cor = COR_TI_ALTO if row.classificacao_ti == "Alto-Ti" else COR_TI_BAIXO
+        # moles (oxido/peso molar) pro indice de Shand -- A/CNK e A/NK
+        mol_al = row.Al2O3 / PESO_MOLAR["Al2O3"]
+        mol_ca = row.CaO / PESO_MOLAR["CaO"]
+        mol_na = row.Na2O / PESO_MOLAR["Na2O"]
+        mol_k = row.K2O / PESO_MOLAR["K2O"]
+        a_cnk = mol_al / (mol_ca + mol_na + mol_k) if (mol_ca + mol_na + mol_k) else None
+        a_nk = mol_al / (mol_na + mol_k) if (mol_na + mol_k) else None
+        # AFM (wt%, normalizado pra somar 100 -- convencao usual do diagrama)
+        a_wt, f_wt, m_wt = row.Na2O + row.K2O, row.Fe2O3T, row.MgO
+        soma_afm = a_wt + f_wt + m_wt
+        registros.append({
+            "id": f"GEOQ-{row.amostra}",
+            "amostra": row.amostra,
+            "origem": row.origem,
+            "classificacao_ti": row.classificacao_ti,
+            "cor": cor,
+            "ponto_id": row.ponto_id if pd.notna(row.ponto_id) else None,
+            "litologia": row.litologia if pd.notna(row.litologia) else None,
+            "lat": float(row.lat) if pd.notna(row.lat) else None,
+            "lon": float(row.lon) if pd.notna(row.lon) else None,
+            "profundidade_m": float(row.profundidade_m) if pd.notna(row.profundidade_m) else None,
+            "SiO2": row.SiO2, "TiO2": row.TiO2, "Al2O3": row.Al2O3, "FeOT": row.FeOT, "Fe2O3T": row.Fe2O3T,
+            "CaO": row.CaO, "MgO": row.MgO, "K2O": row.K2O, "Na2O": row.Na2O, "P2O5": row.P2O5,
+            "Sr": row.Sr, "Zr": row.Zr, "Y": row.Y, "Ti_Zr": row.Ti_Zr, "Zr_Y": row.Zr_Y,
+            "Ti_Y": row.Ti_Zr * row.Zr_Y if pd.notna(row.Ti_Zr) and pd.notna(row.Zr_Y) else None,
+            "tas_x": row.SiO2, "tas_y": row.Na2O + row.K2O,
+            # convencao do diagrama AFM ja usado neste arquivo: a=F(topo), b=A(esquerda), c=M(direita)
+            "afm_a_F": (f_wt / soma_afm * 100) if soma_afm else None,
+            "afm_b_A": (a_wt / soma_afm * 100) if soma_afm else None,
+            "afm_c_M": (m_wt / soma_afm * 100) if soma_afm else None,
+            "shand_acnk": a_cnk, "shand_ank": a_nk,
         })
     return registros
 
@@ -178,6 +244,27 @@ def tema_grafico(fig, titulo, altura=340, nota=None):
 
 NOTA_SEM_DADO = "Só campos de referência — Taió ainda não tem óxido/traço bruto pra plotar"
 NOTA_APROXIMADO = NOTA_SEM_DADO + " · campos digitalizados aproximados (Fontoura, TCC 2024, Fig.12/33 · Peate et al. 1997)"
+NOTA_COM_DADO = "41 amostras (QMC_TAIO_TODOS) · campos de referência digitalizados aproximados (Fontoura, TCC 2024 · Peate et al. 1997)"
+
+
+def trace_pontos_geoq(pontos, x_key, y_key, nome="Amostras Taió"):
+    """Scatter dos pontos reais de geoquimica coloridos por Alto/Baixo-Ti,
+    com hover mostrando a amostra e o ponto de campo associado (quando ha)."""
+    xs, ys, cores, textos = [], [], [], []
+    for p in pontos:
+        x, y = p.get(x_key), p.get(y_key)
+        if x is None or y is None:
+            continue
+        xs.append(x)
+        ys.append(y)
+        cores.append(p["cor"])
+        rotulo = p["amostra"] + (f" ({p['ponto_id']})" if p.get("ponto_id") else "")
+        textos.append(rotulo)
+    return go.Scatter(
+        x=xs, y=ys, mode="markers", name=nome, text=textos, hoverinfo="text",
+        marker=dict(size=8, color=cores, line=dict(width=1, color="#1B1F2E")),
+        showlegend=False,
+    )
 
 
 # ======================================================================
@@ -186,7 +273,7 @@ NOTA_APROXIMADO = NOTA_SEM_DADO + " · campos digitalizados aproximados (Fontour
 #    simplificados (linhas principais, sem todas as subdivisoes finas) ja
 #    que ainda nao ha ponto real do Taio pra classificar contra eles.
 # ======================================================================
-def montar_tas():
+def montar_tas(pontos=None):
     fig = go.Figure()
     linha = dict(color="#A63D2F", width=1.3)
     # curva alcalino/sub-alcalino (aproximada, tracejada)
@@ -217,12 +304,14 @@ def montar_tas():
     for texto, x, y in rotulos:
         fig.add_annotation(x=x, y=y, xref="x", yref="y", text=texto.replace("\n", "<br>"), showarrow=False,
                             font=dict(size=8.5, color="#A63D2F"), align="center")
+    if pontos:
+        fig.add_trace(trace_pontos_geoq(pontos, "tas_x", "tas_y"))
     fig.update_xaxes(title_text="SiO₂", range=[38, 80])
     fig.update_yaxes(title_text="Na₂O + K₂O", range=[0, 16])
-    return tema_grafico(fig, "TAS — Total Álcalis vs Sílica", altura=380, nota=NOTA_SEM_DADO)
+    return tema_grafico(fig, "TAS — Total Álcalis vs Sílica", altura=380, nota=NOTA_COM_DADO if pontos else NOTA_SEM_DADO)
 
 
-def montar_afm():
+def montar_afm(pontos=None):
     fig = go.Figure()
     # curva de Irvine & Baragar (1971), aproximada (A=alcalis, F=FeOt, M=MgO;
     # Plotly ternario: 'a' = vertice de cima, 'b' = esquerda, 'c' = direita
@@ -235,6 +324,18 @@ def montar_afm():
         a=[p[0] for p in curva], b=[p[1] for p in curva], c=[p[2] for p in curva],
         mode="lines", line=dict(color="#A63D2F", width=1.4), hoverinfo="skip", showlegend=False,
     ))
+    if pontos:
+        xs_a, xs_b, xs_c, cores, textos = [], [], [], [], []
+        for p in pontos:
+            if p.get("afm_a_F") is None:
+                continue
+            xs_a.append(p["afm_a_F"]); xs_b.append(p["afm_b_A"]); xs_c.append(p["afm_c_M"])
+            cores.append(p["cor"])
+            textos.append(p["amostra"] + (f" ({p['ponto_id']})" if p.get("ponto_id") else ""))
+        fig.add_trace(go.Scatterternary(
+            a=xs_a, b=xs_b, c=xs_c, mode="markers", text=textos, hoverinfo="text",
+            marker=dict(size=8, color=cores, line=dict(width=1, color="#1B1F2E")), showlegend=False,
+        ))
     fig.update_layout(
         ternary=dict(
             sum=100, bgcolor=COR_PAINEL,
@@ -249,10 +350,10 @@ def montar_afm():
                  font=dict(size=11, color="#A63D2F")),
         ],
     )
-    return tema_grafico(fig, "AFM — Álcalis / FeOt / MgO", altura=380, nota=NOTA_SEM_DADO)
+    return tema_grafico(fig, "AFM — Álcalis / FeOt / MgO", altura=380, nota=NOTA_COM_DADO if pontos else NOTA_SEM_DADO)
 
 
-def montar_shand():
+def montar_shand(pontos=None):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=[1, 1], y=[0, 7], mode="lines", line=dict(color="#A63D2F", width=1.3),
                               hoverinfo="skip", showlegend=False))
@@ -266,9 +367,11 @@ def montar_shand():
     ]:
         fig.add_annotation(x=x, y=y, xref="x", yref="y", text=texto, showarrow=False,
                             font=dict(size=10, color="#A63D2F"))
+    if pontos:
+        fig.add_trace(trace_pontos_geoq(pontos, "shand_acnk", "shand_ank"))
     fig.update_xaxes(title_text="A/CNK", range=[0, 1.6])
     fig.update_yaxes(title_text="A/NK", range=[0, 7])
-    return tema_grafico(fig, "Shand's Index — A/NK × A/CNK", nota=NOTA_SEM_DADO)
+    return tema_grafico(fig, "Shand's Index — A/NK × A/CNK", nota=NOTA_COM_DADO if pontos else NOTA_SEM_DADO)
 
 
 # ======================================================================
@@ -408,12 +511,16 @@ CAMPOS_F_SR_TIY = {
 }
 
 
-def montar_diagrama_campos(campos, titulo, x_titulo, y_titulo, x_range, y_range, suavizar=True, nota=NOTA_APROXIMADO):
+def montar_diagrama_campos(campos, titulo, x_titulo, y_titulo, x_range, y_range, suavizar=True,
+                            nota=NOTA_APROXIMADO, pontos=None, x_key=None, y_key=None):
     fig = go.Figure()
     campos_traces, anotacoes = montar_shapes_campos(campos, suavizar=suavizar)
     for t in campos_traces:
         fig.add_trace(t)
     fig.update_layout(annotations=anotacoes)
+    if pontos and x_key and y_key:
+        fig.add_trace(trace_pontos_geoq(pontos, x_key, y_key))
+        nota = nota.split(" · campos digitalizados")[0] + " · amostras Taió sobrepostas (QMC_TAIO_TODOS) · campos digitalizados aproximados (Fontoura, TCC 2024, Fig.12/33 · Peate et al. 1997)"
     fig.update_xaxes(title_text=x_titulo, range=x_range)
     fig.update_yaxes(title_text=y_titulo, range=y_range)
     return tema_grafico(fig, titulo, nota=nota)
@@ -423,6 +530,18 @@ def main():
     print("Carregando pontos de campo (Taió)...")
     registros_campo = carregar_campo()
     print(f"  {len(registros_campo)} pontos")
+
+    print("Carregando geoquímica bruta (QMC_TAIO_TODOS)...")
+    registros_geoq = carregar_geoquimica()
+    print(f"  {len(registros_geoq)} amostras ({sum(1 for r in registros_geoq if r['lat'] is not None)} com coordenadas)")
+    geoq_por_ponto = {r["ponto_id"]: r for r in registros_geoq if r["ponto_id"]}
+    for r in registros_campo:
+        g = geoq_por_ponto.get(r["nome"])
+        if g:
+            r["geoq"] = {k: g[k] for k in ("SiO2", "TiO2", "Al2O3", "FeOT", "CaO", "MgO", "K2O", "Na2O", "P2O5",
+                                            "Sr", "Zr", "Y", "Ti_Zr", "Zr_Y", "amostra")}
+    geoq_alto = [r for r in registros_geoq if r["classificacao_ti"] == "Alto-Ti"]
+    geoq_baixo = [r for r in registros_geoq if r["classificacao_ti"] == "Baixo-Ti"]
 
     # ------------------------------------------------------------
     # MAPA -- Leaflet (tiles reais, zoom/pan continuo), nao mais Plotly com
@@ -451,6 +570,25 @@ def main():
         } for r in campo_coord],
     }
 
+    # amostras de geoquimica bruta com coordenada (campo + furo -- furo tem
+    # as 15 amostras na mesma coordenada de boca de furo, so a profundidade
+    # muda; ainda assim cada uma vira um marcador, o popup mostra a profundidade)
+    geoq_coord = [r for r in registros_geoq if r["lat"] is not None]
+    geojson_geoq = {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature", "geometry": {"type": "Point", "coordinates": [r["lon"], r["lat"]]},
+            "properties": {
+                "cor": r["cor"],
+                "popup": (
+                    f"<b>{r['amostra']}</b> ({r['classificacao_ti']})<br>{r['origem']}"
+                    + (f"<br>Prof.: {r['profundidade_m']:.1f} m" if r["profundidade_m"] is not None else "")
+                    + f"<br>SiO₂ {r['SiO2']:.1f}% · TiO₂ {r['TiO2']:.2f}% · MgO {r['MgO']:.2f}% · P₂O₅ {r['P2O5']:.2f}%"
+                ),
+            },
+        } for r in geoq_coord],
+    }
+
     # mapa geologico real (CPRM, 9 formacoes) -- mesma camada usada no
     # webmap dedicado (gerar_webmap_taio.py), pedido explicito do usuario
     # ("faltou o mapa geológico junto").
@@ -466,15 +604,21 @@ def main():
     # diagramas geoquimicos -- todos so com campos de referencia (sem
     # pontos, ver nota no topo do arquivo)
     # ------------------------------------------------------------
-    fig_tas = montar_tas()
-    fig_afm = montar_afm()
-    fig_shand = montar_shand()
-    fig_mgo_tio2 = montar_diagrama_campos(CAMPOS_MGO_TIO2, "MgO × TiO₂ (tipos de magma)", "MgO (% em peso)", "TiO₂ (% em peso)", [2, 10], [0.5, 4.8])
-    fig_tiy_tizr = montar_diagrama_campos(CAMPOS_TIY_TIZR, "Ti/Y × Ti/Zr (tipos de magma)", "Ti/Y", "Ti/Zr", [100, 700], [30, 100])
-    fig_fe2o3 = montar_diagrama_campos(CAMPOS_C_FE2O3_TIO2, "Fe₂O₃(t) × TiO₂ — grupo Alto-Ti", "TiO₂", "Fe₂O₃ (t)", [1, 5], [10, 19])
-    fig_zry_sr = montar_diagrama_campos(CAMPOS_D_ZRY_SR, "Zr/Y × Sr — grupo Alto-Ti", "Sr", "Zr/Y", [0, 1200], [4, 10])
-    fig_zry_tizr = montar_diagrama_campos(CAMPOS_E_ZRY_TIZR, "Zr/Y × Ti/Zr — grupo Baixo-Ti", "Ti/Zr", "Zr/Y", [30, 100], [3, 7])
-    fig_sr_tiy = montar_diagrama_campos(CAMPOS_F_SR_TIY, "Sr × Ti/Y — grupo Baixo-Ti", "Ti/Y", "Sr", [100, 600], [100, 400])
+    fig_tas = montar_tas(pontos=registros_geoq)
+    fig_afm = montar_afm(pontos=registros_geoq)
+    fig_shand = montar_shand(pontos=registros_geoq)
+    fig_mgo_tio2 = montar_diagrama_campos(CAMPOS_MGO_TIO2, "MgO × TiO₂ (tipos de magma)", "MgO (% em peso)", "TiO₂ (% em peso)", [2, 10], [0.5, 4.8],
+                                           pontos=registros_geoq, x_key="MgO", y_key="TiO2")
+    fig_tiy_tizr = montar_diagrama_campos(CAMPOS_TIY_TIZR, "Ti/Y × Ti/Zr (tipos de magma)", "Ti/Y", "Ti/Zr", [100, 700], [30, 100],
+                                           pontos=registros_geoq, x_key="Ti_Y", y_key="Ti_Zr")
+    fig_fe2o3 = montar_diagrama_campos(CAMPOS_C_FE2O3_TIO2, "Fe₂O₃(t) × TiO₂ — grupo Alto-Ti", "TiO₂", "Fe₂O₃ (t)", [1, 5], [10, 19],
+                                        pontos=geoq_alto, x_key="TiO2", y_key="Fe2O3T")
+    fig_zry_sr = montar_diagrama_campos(CAMPOS_D_ZRY_SR, "Zr/Y × Sr — grupo Alto-Ti", "Sr", "Zr/Y", [0, 1200], [4, 10],
+                                         pontos=geoq_alto, x_key="Sr", y_key="Zr_Y")
+    fig_zry_tizr = montar_diagrama_campos(CAMPOS_E_ZRY_TIZR, "Zr/Y × Ti/Zr — grupo Baixo-Ti", "Ti/Zr", "Zr/Y", [30, 100], [3, 7],
+                                           pontos=geoq_baixo, x_key="Ti_Zr", y_key="Zr_Y")
+    fig_sr_tiy = montar_diagrama_campos(CAMPOS_F_SR_TIY, "Sr × Ti/Y — grupo Baixo-Ti", "Ti/Y", "Sr", [100, 600], [100, 400],
+                                         pontos=geoq_baixo, x_key="Ti_Y", y_key="Sr")
 
     # ------------------------------------------------------------
     # estatisticas do catalogo de campo (Taio)
@@ -725,7 +869,16 @@ def main():
             layer.on('click', function() {{ selecionarPorId(f.properties.id, 'mapa'); }});
         }},
     }}).addTo(mapa);
-    var overlaysMapa = {{ "Campo (Taió)": campoLayer }};"""
+    var geoqLayer = L.geoJSON({json.dumps(geojson_geoq, ensure_ascii=False)}, {{
+        pointToLayer: function(f, latlng) {{
+            return L.circleMarker(latlng, {{
+                radius: 7, fillColor: f.properties.cor, color: '#1B1F2E', weight: 1.5,
+                fillOpacity: 0.95, pane: 'markerPane',
+            }});
+        }},
+        onEachFeature: function(f, layer) {{ layer.bindPopup(f.properties.popup); }},
+    }}).addTo(mapa);
+    var overlaysMapa = {{ "Campo (Taió)": campoLayer, "Geoquímica (amostras brutas)": geoqLayer }};"""
     if geojson_formacoes is not None:
         html_final += f"""
     var formacoesLayer = L.geoJSON({json.dumps(geojson_formacoes, ensure_ascii=False)}, {{
@@ -784,6 +937,13 @@ def main():
         if (r.tipo_ponto) linhas.push('<div class="linha-popup"><b>Tipo:</b> ' + r.tipo_ponto + '</div>');
         if (r.qualidade) linhas.push('<div class="linha-popup"><b>Qualidade:</b> ' + r.qualidade + '</div>');
         if (r.x !== null && r.x !== undefined) linhas.push('<div class="linha-popup"><b>UTM:</b> ' + Math.round(r.x) + ', ' + Math.round(r.y) + '</div>');
+        if (r.geoq) {{
+            linhas.push('<div class="linha-popup" style="margin-top:4px;"><b>Geoquímica (' + r.geoq.amostra + '):</b></div>');
+            linhas.push('<div class="linha-popup">SiO₂ ' + r.geoq.SiO2.toFixed(1) + '% · TiO₂ ' + r.geoq.TiO2.toFixed(2)
+                + '% · MgO ' + r.geoq.MgO.toFixed(2) + '% · P₂O₅ ' + r.geoq.P2O5.toFixed(2) + '%</div>');
+            linhas.push('<div class="linha-popup">Sr ' + Math.round(r.geoq.Sr) + ' ppm · Zr ' + Math.round(r.geoq.Zr)
+                + ' ppm · Y ' + r.geoq.Y.toFixed(1) + ' ppm</div>');
+        }}
         if (r.descricao) linhas.push('<div class="linha-popup" style="margin-top:4px; opacity:0.75;">' + r.descricao + '</div>');
         return linhas.join('');
     }}
