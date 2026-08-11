@@ -50,6 +50,7 @@ PONTOS_CAMPO_GPKG = (
     BASE.parent.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "pontos_unificados_completo.gpkg"
 )
 GEOQUIMICA_CSV = BASE.parent.parent / "2_Banco_de_Dados" / "QMC_TAIO_TODOS" / "geoquimica_dashboard.csv"
+POLIGON_INTRUSIVA_SHP = BASE.parent.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_intrusiva.shp"
 LOGO_PATH = BASE / "assets" / "logo_gstech.jpg"
 OUT_HTML = BASE / "dashboard_geoquimico.html"
 
@@ -176,6 +177,38 @@ def carregar_geoquimica():
             "shand_acnk": a_cnk, "shand_ank": a_nk,
         })
     return registros
+
+
+# ======================================================================
+# 1c. resumo dos corpos intrusivos (area digitalizada em planta +
+#     classificacao Ti das amostras) -- pro quadro estatico embaixo da lista.
+# ======================================================================
+def carregar_resumo_corpos(registros_geoq):
+    resumo = {"sill_diabasio": {"nome": "Soleira (sill)", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0},
+              "dique": {"nome": "Dique", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0}}
+    if POLIGON_INTRUSIVA_SHP.exists():
+        gdf = gpd.read_file(POLIGON_INTRUSIVA_SHP)
+        mapa_tipo = {"Soleira": "sill_diabasio", "Dique": "dique"}
+        for tipo, grupo in gdf.groupby("tipo"):
+            chave = mapa_tipo.get(tipo)
+            if chave:
+                resumo[chave]["area_km2"] = float(grupo.geometry.area.sum() / 1e6)
+                resumo[chave]["n_poligonos"] = int(len(grupo))
+    # amostras de furo (Soleira Bela Vista) nao tem litologia preenchida no
+    # CSV, mas sao todas do corpo da soleira (nome do furo ja diz) -- as 3
+    # amostras de referencia nao tem associacao espacial/litologica, ficam
+    # de fora da contagem por corpo.
+    for g in registros_geoq:
+        litologia = g["litologia"]
+        if not litologia and g["origem"] and g["origem"].startswith("Furo"):
+            litologia = "sill_diabasio"
+        if litologia not in resumo or not g["classificacao_ti"]:
+            continue
+        if g["classificacao_ti"] == "Alto-Ti":
+            resumo[litologia]["alto"] += 1
+        elif g["classificacao_ti"] == "Baixo-Ti":
+            resumo[litologia]["baixo"] += 1
+    return list(resumo.values())
 
 
 # ======================================================================
@@ -573,6 +606,12 @@ def main():
     geoq_alto = [r for r in registros_geoq if r["classificacao_ti"] == "Alto-Ti"]
     geoq_baixo = [r for r in registros_geoq if r["classificacao_ti"] == "Baixo-Ti"]
 
+    print("Carregando resumo dos corpos intrusivos (área + classificação)...")
+    resumo_corpos = carregar_resumo_corpos(registros_geoq)
+    for corpo in resumo_corpos:
+        print(f"  {corpo['nome']}: {corpo['area_km2']:.1f} km² ({corpo['n_poligonos']} polígonos) — "
+              f"{corpo['alto']} Alto-Ti, {corpo['baixo']} Baixo-Ti")
+
     # ------------------------------------------------------------
     # MAPA -- Leaflet (tiles reais, zoom/pan continuo), nao mais Plotly com
     # imagem estatica esticada -- mesma tecnica do webmap dedicado
@@ -708,6 +747,26 @@ def main():
         </tr>""")
     tabela_html = "".join(linhas_tabela)
 
+    linhas_resumo = []
+    for corpo in resumo_corpos:
+        total_ti = corpo["alto"] + corpo["baixo"]
+        pct_alto = (corpo["alto"] / total_ti * 100) if total_ti else 0
+        pct_baixo = 100 - pct_alto if total_ti else 0
+        barra = (
+            f'<div class="barra-ti"><div class="seg-alto" style="width:{pct_alto:.1f}%"></div>'
+            f'<div class="seg-baixo" style="width:{pct_baixo:.1f}%"></div></div>'
+            f'<div class="legenda-barra">{corpo["alto"]} Alto · {corpo["baixo"]} Baixo</div>'
+            if total_ti else '<div class="legenda-barra">Sem amostra classificada</div>'
+        )
+        linhas_resumo.append(f"""
+        <tr>
+            <td>{corpo['nome']}</td>
+            <td>{corpo['area_km2']:.1f} km²</td>
+            <td>{corpo['n_poligonos']}</td>
+            <td>{barra}</td>
+        </tr>""")
+    resumo_corpos_html = "".join(linhas_resumo)
+
     html_final = f"""<!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -744,7 +803,19 @@ def main():
   .btn-tema.ativo {{ opacity: 1; font-weight: 700; }}
   .btn-tema:not(.ativo) {{ opacity: 0.55; }}
   .layout {{ display: grid; grid-template-columns: 300px 1fr 1fr; gap: 12px; padding: 12px; height: calc(100vh - 90px); min-height: 600px; }}
+  .col-esquerda {{ display: flex; flex-direction: column; gap: 12px; min-height: 0; height: 100%; }}
   .painel {{ background: var(--painel); border: 1px solid {MARCA_ROXO}; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }}
+  .col-esquerda > .painel:first-child {{ flex: 1; min-height: 0; }}
+  .painel-estatico {{ flex: 0 0 auto; }}
+  .tabela-resumo {{ width: 100%; border-collapse: collapse; font-size: 11px; margin: 8px 14px; width: calc(100% - 28px); }}
+  .tabela-resumo th {{ text-align: left; padding: 4px 6px; border-bottom: 1px solid {MARCA_ROXO}; opacity: 0.75; font-weight: 500; }}
+  .tabela-resumo td {{ padding: 5px 6px; border-bottom: 1px solid var(--borda-fraca); vertical-align: middle; }}
+  .tabela-resumo tr:last-child td {{ border-bottom: none; }}
+  .barra-ti {{ display: flex; width: 100%; height: 8px; border-radius: 4px; overflow: hidden; background: var(--borda-fraca); margin-bottom: 3px; }}
+  .barra-ti .seg-alto {{ background: {COR_TI_ALTO}; }}
+  .barra-ti .seg-baixo {{ background: {COR_TI_BAIXO}; }}
+  .legenda-barra {{ font-size: 10px; opacity: 0.65; }}
+  .nota-resumo {{ font-size: 10px; opacity: 0.5; margin: 0 14px 10px 14px; line-height: 1.4; }}
   .painel h2 {{ font-size: 13px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--borda-fraca); color: var(--texto); opacity: 0.85; text-transform: uppercase; letter-spacing: 0.05em; }}
   #busca {{ margin: 10px 14px 0 14px; padding: 7px 10px; border-radius: 6px; border: 1px solid {MARCA_ROXO}; background: var(--input-bg); color: var(--texto); font-family: {MARCA_FONTE}; }}
   .contagem {{ font-size: 11px; opacity: 0.6; padding: 6px 14px 0 14px; }}
@@ -796,15 +867,25 @@ def main():
   </div>
 </header>
 <div class="layout">
-  <div class="painel">
-    <h2>Lista de dados</h2>
-    <input id="busca" type="text" placeholder="Buscar por nome, litologia...">
-    <div class="contagem" id="contagem"></div>
-    <div class="lista-scroll">
-      <table>
-        <thead><tr><th>Nome</th><th>Litologia</th><th>Ti</th></tr></thead>
-        <tbody id="corpo-tabela">{tabela_html}</tbody>
+  <div class="col-esquerda">
+    <div class="painel">
+      <h2>Lista de dados</h2>
+      <input id="busca" type="text" placeholder="Buscar por nome, litologia...">
+      <div class="contagem" id="contagem"></div>
+      <div class="lista-scroll">
+        <table>
+          <thead><tr><th>Nome</th><th>Litologia</th><th>Ti</th></tr></thead>
+          <tbody id="corpo-tabela">{tabela_html}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="painel painel-estatico">
+      <h2>Corpos intrusivos — área &amp; classificação</h2>
+      <table class="tabela-resumo">
+        <thead><tr><th>Corpo</th><th>Área</th><th>Polígonos</th><th>Classificação Ti</th></tr></thead>
+        <tbody>{resumo_corpos_html}</tbody>
       </table>
+      <p class="nota-resumo">Área digitalizada em planta (poligon_intrusiva.shp) · classificação Ti das amostras de geoquímica (furo contam como soleira; 3 amostras de referência sem corpo associado ficam de fora)</p>
     </div>
   </div>
   <div class="painel col-graficos">
