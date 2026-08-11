@@ -161,6 +161,8 @@ def carregar_geoquimica():
             "litologia": row.litologia if pd.notna(row.litologia) else None,
             "lat": float(row.lat) if pd.notna(row.lat) else None,
             "lon": float(row.lon) if pd.notna(row.lon) else None,
+            "utm_e": float(row.utm_e) if pd.notna(row.utm_e) else None,
+            "utm_n": float(row.utm_n) if pd.notna(row.utm_n) else None,
             "profundidade_m": float(row.profundidade_m) if pd.notna(row.profundidade_m) else None,
             "SiO2": row.SiO2, "TiO2": row.TiO2, "Al2O3": row.Al2O3, "FeOT": row.FeOT, "Fe2O3T": row.Fe2O3T,
             "CaO": row.CaO, "MgO": row.MgO, "K2O": row.K2O, "Na2O": row.Na2O, "P2O5": row.P2O5,
@@ -249,8 +251,10 @@ NOTA_COM_DADO = "41 amostras (QMC_TAIO_TODOS) · campos de referência digitaliz
 
 def trace_pontos_geoq(pontos, x_key, y_key, nome="Amostras Taió"):
     """Scatter dos pontos reais de geoquimica coloridos por Alto/Baixo-Ti,
-    com hover mostrando a amostra e o ponto de campo associado (quando ha)."""
-    xs, ys, cores, textos = [], [], [], []
+    com hover mostrando a amostra e o ponto de campo associado (quando ha).
+    customdata carrega o id (GEOQ-<amostra>) pra clique sincronizar com a
+    lista/mapa via selecionarPorId no JS."""
+    xs, ys, cores, textos, ids = [], [], [], [], []
     for p in pontos:
         x, y = p.get(x_key), p.get(y_key)
         if x is None or y is None:
@@ -260,8 +264,9 @@ def trace_pontos_geoq(pontos, x_key, y_key, nome="Amostras Taió"):
         cores.append(p["cor"])
         rotulo = p["amostra"] + (f" ({p['ponto_id']})" if p.get("ponto_id") else "")
         textos.append(rotulo)
+        ids.append(p["id"])
     return go.Scatter(
-        x=xs, y=ys, mode="markers", name=nome, text=textos, hoverinfo="text",
+        x=xs, y=ys, mode="markers", name=nome, text=textos, hoverinfo="text", customdata=ids,
         marker=dict(size=8, color=cores, line=dict(width=1, color="#1B1F2E")),
         showlegend=False,
     )
@@ -526,6 +531,30 @@ def montar_diagrama_campos(campos, titulo, x_titulo, y_titulo, x_range, y_range,
     return tema_grafico(fig, titulo, nota=nota)
 
 
+def registro_lista_geoq(g):
+    """Converte uma amostra de geoquimica bruta pro mesmo formato dos
+    registros de campo, pra poder entrar na lista/DADOS_POR_ID e ficar
+    clicavel igual (selecionarPorId funciona pra qualquer id presente ali,
+    nao importa a origem)."""
+    r = {
+        "id": g["id"],
+        "nome": g["amostra"],
+        "litologia": g["litologia"] or "—",
+        "classificacao_ti": g["classificacao_ti"],
+        "tipo_ponto": f"Amostra ({g['origem']})",
+        "qualidade": "",
+        "x": g["utm_e"], "y": g["utm_n"],
+        "descricao": f"Prof.: {g['profundidade_m']:.1f} m" if g["profundidade_m"] is not None else "",
+        "tem_geoquimica": True,
+        "cor_mapa": g["cor"],
+        "geoq": {k: g[k] for k in ("SiO2", "TiO2", "Al2O3", "FeOT", "CaO", "MgO", "K2O", "Na2O", "P2O5",
+                                    "Sr", "Zr", "Y", "Ti_Zr", "Zr_Y", "amostra")},
+    }
+    if g["lat"] is not None and g["lon"] is not None:
+        r["lat"], r["lon"] = g["lat"], g["lon"]
+    return r
+
+
 def main():
     print("Carregando pontos de campo (Taió)...")
     registros_campo = carregar_campo()
@@ -579,6 +608,7 @@ def main():
         "features": [{
             "type": "Feature", "geometry": {"type": "Point", "coordinates": [r["lon"], r["lat"]]},
             "properties": {
+                "id": r["id"],
                 "cor": r["cor"],
                 "popup": (
                     f"<b>{r['amostra']}</b> ({r['classificacao_ti']})<br>{r['origem']}"
@@ -654,7 +684,8 @@ def main():
     html_lito_taio = pio.to_html(fig_lito_taio, full_html=False, include_plotlyjs=False, div_id="grafico-lito-taio")
     html_ti_taio = pio.to_html(fig_ti_taio, full_html=False, include_plotlyjs=False, div_id="grafico-ti-taio")
 
-    dados_js = json.dumps(registros_campo, ensure_ascii=False)
+    registros_geoq_lista = [registro_lista_geoq(g) for g in registros_geoq]
+    dados_js = json.dumps(registros_campo + registros_geoq_lista, ensure_ascii=False)
     logo_b64 = logo_base64()
 
     linhas_tabela = []
@@ -665,6 +696,14 @@ def main():
             <td><span class="nome-ponto">{r['nome']}</span></td>
             <td>{r['litologia'] or '—'}</td>
             <td>{r['classificacao_ti'] or '—'}</td>
+        </tr>""")
+    for g in registros_geoq:
+        busca = f"{g['amostra']} {g['origem']} amostra geoquimica {g['litologia'] or ''} {g['ponto_id'] or ''}".lower()
+        linhas_tabela.append(f"""
+        <tr class="linha-dado linha-geoq" data-id="{g['id']}" data-busca="{busca}">
+            <td><span class="dot-cor" style="background:{g['cor']}"></span><span class="nome-ponto">{g['amostra']}</span></td>
+            <td>{g['litologia'] or g['origem']}</td>
+            <td>{g['classificacao_ti'] or '—'}</td>
         </tr>""")
     tabela_html = "".join(linhas_tabela)
 
@@ -723,6 +762,8 @@ def main():
     color: {MARCA_ROXO}; font-weight: 700; border-color: {MARCA_ROXO}; background: rgba(123,47,255,0.18);
   }}
   body.tema-claro .linha-dado.selecionada .nome-ponto {{ color: #5A1FBF; border-color: #5A1FBF; }}
+  .dot-cor {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }}
+  .linha-geoq {{ border-left: 3px solid {MARCA_ROXO}; }}
   footer {{ text-align: center; padding: 8px; opacity: 0.55; font-size: 11px; }}
   #mapa-leaflet {{ flex: 1; }}
   .col-graficos {{ overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 12px; }}
@@ -800,6 +841,17 @@ def main():
         document.getElementById('grafico-lito-taio'), document.getElementById('grafico-ti-taio'),
     ];
 
+    // clique num ponto de amostra em qualquer diagrama sincroniza com a
+    // lista/mapa (mesmo id GEOQ-<amostra> usado no customdata da trace).
+    TODOS_GD.forEach(function(gd) {{
+        if (!gd) return;
+        gd.on('plotly_click', function(ev) {{
+            var pt = ev.points && ev.points[0];
+            if (!pt || pt.customdata === undefined || pt.customdata === null) return;
+            selecionarPorId(pt.customdata, 'grafico');
+        }});
+    }});
+
     // tema claro/escuro -- moldura (fundo/eixos/legenda/botoes) muda, cores
     // dos dados (litologia, campos de literatura) ficam fixas.
     var TEMA = {{
@@ -876,7 +928,10 @@ def main():
                 fillOpacity: 0.95, pane: 'markerPane',
             }});
         }},
-        onEachFeature: function(f, layer) {{ layer.bindPopup(f.properties.popup); }},
+        onEachFeature: function(f, layer) {{
+            layer.bindPopup(f.properties.popup);
+            layer.on('click', function() {{ selecionarPorId(f.properties.id, 'mapa'); }});
+        }},
     }}).addTo(mapa);
     var overlaysMapa = {{ "Campo (Taió)": campoLayer, "Geoquímica (amostras brutas)": geoqLayer }};"""
     if geojson_formacoes is not None:
