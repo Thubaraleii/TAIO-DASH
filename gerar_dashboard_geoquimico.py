@@ -212,6 +212,44 @@ def carregar_resumo_corpos(registros_geoq):
 
 
 # ======================================================================
+# 1d. apanhado estatistico dos elementos quimicos (oxidos maiores + tracos)
+#     -- pro quadro embaixo da coluna de graficos.
+# ======================================================================
+ELEMENTOS_OXIDOS = [
+    ("SiO2", "SiO₂", "%"), ("TiO2", "TiO₂", "%"), ("Al2O3", "Al₂O₃", "%"), ("Fe2O3T", "Fe₂O₃(t)", "%"),
+    ("MgO", "MgO", "%"), ("CaO", "CaO", "%"), ("Na2O", "Na₂O", "%"), ("K2O", "K₂O", "%"),
+    ("MnO", "MnO", "%"), ("P2O5", "P₂O₅", "%"),
+]
+ELEMENTOS_TRACOS = [
+    ("Sr", "Sr", "ppm"), ("Zr", "Zr", "ppm"), ("Y", "Y", "ppm"),
+    ("Nb", "Nb", "ppm"), ("Rb", "Rb", "ppm"), ("Ba", "Ba", "ppm"),
+]
+
+
+def calcular_estatisticas_elementos():
+    if not GEOQUIMICA_CSV.exists():
+        return [], []
+    df = pd.read_csv(GEOQUIMICA_CSV)
+
+    def montar(lista_elementos):
+        stats = []
+        for coluna, label, unidade in lista_elementos:
+            if coluna not in df.columns:
+                continue
+            serie = df[coluna].dropna()
+            if serie.empty:
+                continue
+            stats.append({
+                "label": label, "unidade": unidade, "n": int(serie.count()),
+                "min": float(serie.min()), "media": float(serie.mean()),
+                "mediana": float(serie.median()), "max": float(serie.max()),
+            })
+        return stats
+
+    return montar(ELEMENTOS_OXIDOS), montar(ELEMENTOS_TRACOS)
+
+
+# ======================================================================
 # 2. suavizacao de poligonos (campos de literatura) -- Catmull-Rom, mesma
 #    tecnica portada do notebook GeoQMASTER_VF.ipynb do usuario.
 # ======================================================================
@@ -612,6 +650,10 @@ def main():
         print(f"  {corpo['nome']}: {corpo['area_km2']:.1f} km² ({corpo['n_poligonos']} polígonos) — "
               f"{corpo['alto']} Alto-Ti, {corpo['baixo']} Baixo-Ti")
 
+    print("Calculando estatísticas dos elementos químicos...")
+    estat_oxidos, estat_tracos = calcular_estatisticas_elementos()
+    print(f"  {len(estat_oxidos)} óxidos, {len(estat_tracos)} traços")
+
     # ------------------------------------------------------------
     # MAPA -- Leaflet (tiles reais, zoom/pan continuo), nao mais Plotly com
     # imagem estatica esticada -- mesma tecnica do webmap dedicado
@@ -767,6 +809,31 @@ def main():
         </tr>""")
     resumo_corpos_html = "".join(linhas_resumo)
 
+    def montar_linhas_estatisticas(lista_stats):
+        linhas = []
+        for e in lista_stats:
+            faixa = e["max"] - e["min"]
+            pct_media = ((e["media"] - e["min"]) / faixa * 100) if faixa else 50
+            pct_mediana = ((e["mediana"] - e["min"]) / faixa * 100) if faixa else 50
+            casas = 2 if e["unidade"] == "%" else 1
+            linhas.append(f"""
+            <tr>
+                <td>{e['label']}</td>
+                <td>{e['min']:.{casas}f}</td>
+                <td>
+                    <div class="faixa-elemento">
+                        <div class="marca-mediana" style="left:{pct_mediana:.1f}%" title="Mediana: {e['mediana']:.{casas}f}"></div>
+                        <div class="marca-media" style="left:{pct_media:.1f}%" title="Média: {e['media']:.{casas}f}"></div>
+                    </div>
+                </td>
+                <td>{e['media']:.{casas}f} {e['unidade']}</td>
+                <td>{e['max']:.{casas}f}</td>
+            </tr>""")
+        return "".join(linhas)
+
+    estatisticas_oxidos_html = montar_linhas_estatisticas(estat_oxidos)
+    estatisticas_tracos_html = montar_linhas_estatisticas(estat_tracos)
+
     html_final = f"""<!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -816,6 +883,12 @@ def main():
   .barra-ti .seg-baixo {{ background: {COR_TI_BAIXO}; }}
   .legenda-barra {{ font-size: 10px; opacity: 0.65; }}
   .nota-resumo {{ font-size: 10px; opacity: 0.5; margin: 0 14px 10px 14px; line-height: 1.4; }}
+  .subtitulo-estatistica {{ font-size: 11px; font-weight: 600; opacity: 0.75; margin: 10px 14px 0 14px; text-transform: uppercase; letter-spacing: 0.04em; }}
+  .tabela-estatistica td:first-child {{ white-space: nowrap; }}
+  .faixa-elemento {{ position: relative; width: 100%; min-width: 70px; height: 10px; }}
+  .faixa-elemento::before {{ content: ''; position: absolute; top: 4px; left: 0; right: 0; height: 2px; background: var(--borda-fraca); border-radius: 1px; }}
+  .marca-media {{ position: absolute; top: 1px; width: 8px; height: 8px; border-radius: 50%; background: {MARCA_ROXO}; transform: translateX(-50%); }}
+  .marca-mediana {{ position: absolute; top: -1px; width: 2px; height: 12px; background: var(--texto); opacity: 0.55; transform: translateX(-50%); }}
   .painel h2 {{ font-size: 13px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--borda-fraca); color: var(--texto); opacity: 0.85; text-transform: uppercase; letter-spacing: 0.05em; }}
   #busca {{ margin: 10px 14px 0 14px; padding: 7px 10px; border-radius: 6px; border: 1px solid {MARCA_ROXO}; background: var(--input-bg); color: var(--texto); font-family: {MARCA_FONTE}; }}
   .contagem {{ font-size: 11px; opacity: 0.6; padding: 6px 14px 0 14px; }}
@@ -900,6 +973,20 @@ def main():
     <div class="grafico-card">{html_sr_tiy}</div>
     <div class="grafico-card">{html_lito_taio}</div>
     <div class="grafico-card">{html_ti_taio}</div>
+    <div class="grafico-card painel-estatico">
+      <h2>Apanhado estatístico — elementos químicos (41 amostras)</h2>
+      <p class="subtitulo-estatistica">Óxidos maiores (% em peso)</p>
+      <table class="tabela-resumo tabela-estatistica">
+        <thead><tr><th>Elemento</th><th>Mín</th><th>Distribuição</th><th>Média</th><th>Máx</th></tr></thead>
+        <tbody>{estatisticas_oxidos_html}</tbody>
+      </table>
+      <p class="subtitulo-estatistica">Elementos traço (ppm)</p>
+      <table class="tabela-resumo tabela-estatistica">
+        <thead><tr><th>Elemento</th><th>Mín</th><th>Distribuição</th><th>Média</th><th>Máx</th></tr></thead>
+        <tbody>{estatisticas_tracos_html}</tbody>
+      </table>
+      <p class="nota-resumo">Faixa vai do mínimo ao máximo observado · <span style="color:{MARCA_ROXO}">●</span> média · <span style="opacity:0.6">▏</span> mediana</p>
+    </div>
   </div>
   <div class="painel">
     <h2>Mapa</h2>
