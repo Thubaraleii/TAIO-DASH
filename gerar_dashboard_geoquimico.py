@@ -1174,7 +1174,7 @@ def main():
         attribution: '&copy; OpenStreetMap contributors, SRTM &copy; OpenTopoMap (CC-BY-SA)',
         maxZoom: 17, subdomains: 'abc',
     }});
-    escuro.addTo(mapa);
+    satelite.addTo(mapa);
     mapa.fitBounds({json.dumps(bounds_taio)});
 
     function pontoEstilo(cor, raio) {{
@@ -1186,7 +1186,7 @@ def main():
             layer.bindPopup(f.properties.popup);
             layer.on('click', function() {{ selecionarPorId(f.properties.id, 'mapa'); }});
         }},
-    }}).addTo(mapa);
+    }});
     var geoqLayer = L.geoJSON({json.dumps(geojson_geoq, ensure_ascii=False)}, {{
         pointToLayer: function(f, latlng) {{
             return L.circleMarker(latlng, {{
@@ -1205,7 +1205,7 @@ def main():
     var formacoesLayer = L.geoJSON({json.dumps(geojson_formacoes, ensure_ascii=False)}, {{
         style: function(f) {{ return {{ color: '#000', weight: 0.5, fillColor: f.properties.cor, fillOpacity: 0.5 }}; }},
         onEachFeature: function(f, layer) {{ layer.bindPopup(f.properties.popup); }},
-    }}).addTo(mapa);
+    }});
     overlaysMapa["Mapa geológico real (CPRM)"] = formacoesLayer;"""
     html_final += f"""
     L.control.layers(
