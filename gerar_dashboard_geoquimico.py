@@ -44,6 +44,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 from pyproj import Transformer
+from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+from shapely.geometry import Point
+from shapely.prepared import prep
 
 BASE = Path(__file__).parent
 PONTOS_CAMPO_GPKG = (
@@ -51,6 +54,20 @@ PONTOS_CAMPO_GPKG = (
 )
 GEOQUIMICA_CSV = BASE.parent.parent / "2_Banco_de_Dados" / "QMC_TAIO_TODOS" / "geoquimica_dashboard.csv"
 POLIGON_INTRUSIVA_SHP = BASE.parent.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_intrusiva.shp"
+TOPO_NPY = BASE.parent / "dados_entrada" / "topografia_drone" / "topografia_xyz.npy"
+
+# mesmo plano de mergulho regional + erosao contra o relevo real ja usado pra
+# desenhar a camada Serra Alta e a base do sill no visualizador 3D/secao 2D
+# (ver elevacao_serra_alta em gerar_visualizador_3d.py) -- reaproveitado aqui
+# so pra estimar o VOLUME do sill (topo real menos topo da Serra Alta).
+TREND_A, TREND_B = 0.01034, -0.00025
+TREND_X0, TREND_Y0 = 592300.0, 7015058.8
+Z_REF_TILT = 1053.5
+PROFUNDIDADE_SERRA_ALTA = 350.0
+ESPESSURA_MINIMA_SILL = 27.0  # mediana real de campo -- mesmo piso do visualizador 3D
+ESPESSURA_MEDIANA_DIQUE = 6.0  # mediana real de campo (05_gerar_solidos_visualizacao.py) -- o
+# dique nao tem uma base geologica equivalente a Serra Alta do sill (corta a sequencia toda
+# quase na vertical), entao o volume usa essa espessura tabular constante x area
 LOGO_PATH = BASE / "assets" / "logo_gstech.jpg"
 OUT_HTML = BASE / "dashboard_geoquimico.html"
 
@@ -183,17 +200,65 @@ def carregar_geoquimica():
 # 1c. resumo dos corpos intrusivos (area digitalizada em planta +
 #     classificacao Ti das amostras) -- pro quadro estatico embaixo da lista.
 # ======================================================================
+def elevacao_serra_alta(x, y, elevacao_fn):
+    """Cota do topo da Serra Alta num ponto (x,y) -- mesma formula usada em
+    gerar_visualizador_3d.py, reaproveitada so pra estimar volume aqui."""
+    plano = Z_REF_TILT + TREND_A * (x - TREND_X0) + TREND_B * (y - TREND_Y0) - PROFUNDIDADE_SERRA_ALTA
+    return min(plano, elevacao_fn(x, y))
+
+
+def calcular_volume_sill_m3(grupo_sill, elevacao_fn, passo=80.0):
+    """Volume do sill (m3) integrando numericamente (topo real - base
+    geologica) numa grade regular sobre cada lobo -- mesma base "topo da
+    Serra Alta com piso minimo de 27m" usada no visualizador 3D/secao 2D
+    (ver elevacao_serra_alta), so que aqui vira um numero agregado em vez de
+    uma malha 3D."""
+    volume_total = 0.0
+    celula_m2 = passo * passo
+    for poligono in grupo_sill.geometry:
+        partes = poligono.geoms if poligono.geom_type == "MultiPolygon" else [poligono]
+        for parte in partes:
+            minx, miny, maxx, maxy = parte.bounds
+            xs = np.arange(minx + passo / 2, maxx, passo)
+            ys = np.arange(miny + passo / 2, maxy, passo)
+            if len(xs) == 0 or len(ys) == 0:
+                xs, ys = np.array([(minx + maxx) / 2]), np.array([(miny + maxy) / 2])
+            mascara_pt = prep(parte)
+            for x in xs:
+                for y in ys:
+                    if not mascara_pt.contains(Point(x, y)):
+                        continue
+                    z_topo = elevacao_fn(x, y)
+                    z_base = min(elevacao_serra_alta(x, y, elevacao_fn), z_topo - ESPESSURA_MINIMA_SILL)
+                    volume_total += (z_topo - z_base) * celula_m2
+    return volume_total
+
+
 def carregar_resumo_corpos(registros_geoq):
-    resumo = {"sill_diabasio": {"nome": "Soleira (sill)", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0},
-              "dique": {"nome": "Dique", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0}}
+    resumo = {"sill_diabasio": {"nome": "Soleira (sill)", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0, "volume_km3": None},
+              "dique": {"nome": "Dique", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0, "volume_km3": None}}
     if POLIGON_INTRUSIVA_SHP.exists():
         gdf = gpd.read_file(POLIGON_INTRUSIVA_SHP)
         mapa_tipo = {"Soleira": "sill_diabasio", "Dique": "dique"}
         for tipo, grupo in gdf.groupby("tipo"):
             chave = mapa_tipo.get(tipo)
-            if chave:
-                resumo[chave]["area_km2"] = float(grupo.geometry.area.sum() / 1e6)
-                resumo[chave]["n_poligonos"] = int(len(grupo))
+            if not chave:
+                continue
+            area_m2 = float(grupo.geometry.area.sum())
+            resumo[chave]["area_km2"] = area_m2 / 1e6
+            resumo[chave]["n_poligonos"] = int(len(grupo))
+            if chave == "dique":
+                resumo[chave]["volume_km3"] = area_m2 * ESPESSURA_MEDIANA_DIQUE / 1e9
+            elif chave == "sill_diabasio" and TOPO_NPY.exists():
+                xyz = np.load(TOPO_NPY)
+                linear = LinearNDInterpolator(xyz[:, :2], xyz[:, 2])
+                nearest = NearestNDInterpolator(xyz[:, :2], xyz[:, 2])
+
+                def elevacao_fn(x, y):
+                    z = linear(x, y)
+                    return float(z) if not np.isnan(z) else float(nearest(x, y))
+
+                resumo[chave]["volume_km3"] = calcular_volume_sill_m3(grupo, elevacao_fn) / 1e9
     # amostras de furo (Soleira Bela Vista) nao tem litologia preenchida no
     # CSV, mas sao todas do corpo da soleira (nome do furo ja diz) -- as 3
     # amostras de referencia nao tem associacao espacial/litologica, ficam
@@ -754,17 +819,17 @@ def main():
     print("Montando HTML final...")
     # a biblioteca plotly.js so precisa ser embutida uma vez -- na PRIMEIRA
     # figura que aparece na pagina.
-    html_tas = pio.to_html(fig_tas, full_html=False, include_plotlyjs=True, div_id="grafico-tas")
-    html_afm = pio.to_html(fig_afm, full_html=False, include_plotlyjs=False, div_id="grafico-afm")
-    html_shand = pio.to_html(fig_shand, full_html=False, include_plotlyjs=False, div_id="grafico-shand")
-    html_mgo_tio2 = pio.to_html(fig_mgo_tio2, full_html=False, include_plotlyjs=False, div_id="grafico-mgo-tio2")
-    html_tiy_tizr = pio.to_html(fig_tiy_tizr, full_html=False, include_plotlyjs=False, div_id="grafico-tiy-tizr")
-    html_fe2o3 = pio.to_html(fig_fe2o3, full_html=False, include_plotlyjs=False, div_id="grafico-fe2o3")
-    html_zry_sr = pio.to_html(fig_zry_sr, full_html=False, include_plotlyjs=False, div_id="grafico-zry-sr")
-    html_zry_tizr = pio.to_html(fig_zry_tizr, full_html=False, include_plotlyjs=False, div_id="grafico-zry-tizr")
-    html_sr_tiy = pio.to_html(fig_sr_tiy, full_html=False, include_plotlyjs=False, div_id="grafico-sr-tiy")
-    html_lito_taio = pio.to_html(fig_lito_taio, full_html=False, include_plotlyjs=False, div_id="grafico-lito-taio")
-    html_ti_taio = pio.to_html(fig_ti_taio, full_html=False, include_plotlyjs=False, div_id="grafico-ti-taio")
+    html_tas = pio.to_html(fig_tas, full_html=False, include_plotlyjs=True, div_id="grafico-tas", config={"responsive": True})
+    html_afm = pio.to_html(fig_afm, full_html=False, include_plotlyjs=False, div_id="grafico-afm", config={"responsive": True})
+    html_shand = pio.to_html(fig_shand, full_html=False, include_plotlyjs=False, div_id="grafico-shand", config={"responsive": True})
+    html_mgo_tio2 = pio.to_html(fig_mgo_tio2, full_html=False, include_plotlyjs=False, div_id="grafico-mgo-tio2", config={"responsive": True})
+    html_tiy_tizr = pio.to_html(fig_tiy_tizr, full_html=False, include_plotlyjs=False, div_id="grafico-tiy-tizr", config={"responsive": True})
+    html_fe2o3 = pio.to_html(fig_fe2o3, full_html=False, include_plotlyjs=False, div_id="grafico-fe2o3", config={"responsive": True})
+    html_zry_sr = pio.to_html(fig_zry_sr, full_html=False, include_plotlyjs=False, div_id="grafico-zry-sr", config={"responsive": True})
+    html_zry_tizr = pio.to_html(fig_zry_tizr, full_html=False, include_plotlyjs=False, div_id="grafico-zry-tizr", config={"responsive": True})
+    html_sr_tiy = pio.to_html(fig_sr_tiy, full_html=False, include_plotlyjs=False, div_id="grafico-sr-tiy", config={"responsive": True})
+    html_lito_taio = pio.to_html(fig_lito_taio, full_html=False, include_plotlyjs=False, div_id="grafico-lito-taio", config={"responsive": True})
+    html_ti_taio = pio.to_html(fig_ti_taio, full_html=False, include_plotlyjs=False, div_id="grafico-ti-taio", config={"responsive": True})
 
     registros_geoq_lista = [registro_lista_geoq(g) for g in registros_geoq]
     dados_js = json.dumps(registros_campo + registros_geoq_lista, ensure_ascii=False)
@@ -800,10 +865,12 @@ def main():
             f'<div class="legenda-barra">{corpo["alto"]} Alto · {corpo["baixo"]} Baixo</div>'
             if total_ti else '<div class="legenda-barra">Sem amostra classificada</div>'
         )
+        volume_txt = f"{corpo['volume_km3']:.2f} km³" if corpo["volume_km3"] is not None else "—"
         linhas_resumo.append(f"""
         <tr>
             <td>{corpo['nome']}</td>
             <td>{corpo['area_km2']:.1f} km²</td>
+            <td>{volume_txt}</td>
             <td>{corpo['n_poligonos']}</td>
             <td>{barra}</td>
         </tr>""")
@@ -953,12 +1020,12 @@ def main():
       </div>
     </div>
     <div class="painel painel-estatico">
-      <h2>Corpos intrusivos — área &amp; classificação</h2>
+      <h2>Corpos intrusivos — área, volume &amp; classificação</h2>
       <table class="tabela-resumo">
-        <thead><tr><th>Corpo</th><th>Área</th><th>Polígonos</th><th>Classificação Ti</th></tr></thead>
+        <thead><tr><th>Corpo</th><th>Área</th><th>Volume</th><th>Polígonos</th><th>Classificação Ti</th></tr></thead>
         <tbody>{resumo_corpos_html}</tbody>
       </table>
-      <p class="nota-resumo">Área digitalizada em planta (poligon_intrusiva.shp) · classificação Ti das amostras de geoquímica (furo contam como soleira; 3 amostras de referência sem corpo associado ficam de fora)</p>
+      <p class="nota-resumo">Área digitalizada em planta (poligon_intrusiva.shp) · volume estimado (sill: topografia real menos topo da Serra Alta, piso de 27m · dique: espessura mediana de campo de 6m × área) · classificação Ti das amostras de geoquímica (furo contam como soleira; 3 amostras de referência sem corpo associado ficam de fora)</p>
     </div>
   </div>
   <div class="painel col-graficos">
