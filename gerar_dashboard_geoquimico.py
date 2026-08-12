@@ -169,13 +169,19 @@ def carregar_geoquimica():
         # AFM (wt%, normalizado pra somar 100 -- convencao usual do diagrama)
         a_wt, f_wt, m_wt = row.Na2O + row.K2O, row.Fe2O3T, row.MgO
         soma_afm = a_wt + f_wt + m_wt
+        ponto_id = row.ponto_id if pd.notna(row.ponto_id) else None
         registros.append({
             "id": f"GEOQ-{row.amostra}",
+            # id_display: pra amostra ja associada a um ponto de campo (tem
+            # ponto_id), clique no mapa/grafico seleciona a linha do PONTO DE
+            # CAMPO na lista (mesma amostra, sem duplicar linha) -- so as
+            # amostras sem ponto de campo (furo/referencia) usam o proprio id.
+            "id_display": f"CAMPO-{ponto_id}" if ponto_id else f"GEOQ-{row.amostra}",
             "amostra": row.amostra,
             "origem": row.origem,
             "classificacao_ti": row.classificacao_ti,
             "cor": cor,
-            "ponto_id": row.ponto_id if pd.notna(row.ponto_id) else None,
+            "ponto_id": ponto_id,
             "litologia": row.litologia if pd.notna(row.litologia) else None,
             "lat": float(row.lat) if pd.notna(row.lat) else None,
             "lon": float(row.lon) if pd.notna(row.lon) else None,
@@ -400,7 +406,7 @@ def trace_pontos_geoq(pontos, x_key, y_key, nome="Amostras Taió"):
         cores.append(p["cor"])
         rotulo = p["amostra"] + (f" ({p['ponto_id']})" if p.get("ponto_id") else "")
         textos.append(rotulo)
-        ids.append(p["id"])
+        ids.append(p["id_display"])
     return go.Scatter(
         x=xs, y=ys, mode="markers", name=nome, text=textos, hoverinfo="text", customdata=ids,
         marker=dict(size=8, color=cores, line=dict(width=1, color="#1B1F2E")),
@@ -473,7 +479,7 @@ def montar_afm(pontos=None):
             xs_a.append(p["afm_a_F"]); xs_b.append(p["afm_b_A"]); xs_c.append(p["afm_c_M"])
             cores.append(p["cor"])
             textos.append(p["amostra"] + (f" ({p['ponto_id']})" if p.get("ponto_id") else ""))
-            ids.append(p["id"])
+            ids.append(p["id_display"])
         fig.add_trace(go.Scatterternary(
             a=xs_a, b=xs_b, c=xs_c, mode="markers", text=textos, hoverinfo="text", customdata=ids,
             name="Amostras Taió", marker=dict(size=8, color=cores, line=dict(width=1, color="#1B1F2E")), showlegend=False,
@@ -764,7 +770,7 @@ def main():
         "features": [{
             "type": "Feature", "geometry": {"type": "Point", "coordinates": [r["lon"], r["lat"]]},
             "properties": {
-                "id": r["id"],
+                "id": r["id_display"],
                 "cor": r["cor"],
                 "popup": (
                     f"<b>{r['amostra']}</b> ({r['classificacao_ti']})<br>{r['origem']}"
@@ -846,7 +852,12 @@ def main():
     html_lito_taio = pio.to_html(fig_lito_taio, full_html=False, include_plotlyjs=False, div_id="grafico-lito-taio", config={"responsive": True})
     html_ti_taio = pio.to_html(fig_ti_taio, full_html=False, include_plotlyjs=False, div_id="grafico-ti-taio", config={"responsive": True})
 
-    registros_geoq_lista = [registro_lista_geoq(g) for g in registros_geoq]
+    # so amostras SEM ponto de campo correspondente (furo/referencia) viram
+    # linha propria na lista -- as que ja tem ponto_id foram mescladas dentro
+    # do registro de campo (r["geoq"]) la em cima, mostrar as duas seria
+    # duplicar a mesma amostra fisica com dois nomes diferentes na lista.
+    registros_geoq_sem_campo = [g for g in registros_geoq if not g["ponto_id"]]
+    registros_geoq_lista = [registro_lista_geoq(g) for g in registros_geoq_sem_campo]
     dados_js = json.dumps(registros_campo + registros_geoq_lista, ensure_ascii=False)
     logo_b64 = logo_base64()
 
@@ -855,11 +866,11 @@ def main():
         linhas_tabela.append(f"""
         <tr class="linha-dado" data-id="{r['id']}"
             data-busca="{(r['nome'] + ' ' + (r['litologia'] or '')).lower()}">
-            <td><span class="nome-ponto">{r['nome']}</span></td>
+            <td><span class="dot-cor" style="background:{r['cor_mapa']}"></span><span class="nome-ponto">{r['nome']}</span></td>
             <td>{r['litologia'] or '—'}</td>
             <td>{r['classificacao_ti'] or '—'}</td>
         </tr>""")
-    for g in registros_geoq:
+    for g in registros_geoq_sem_campo:
         busca = f"{g['amostra']} {g['origem']} amostra geoquimica {g['litologia'] or ''} {g['ponto_id'] or ''}".lower()
         linhas_tabela.append(f"""
         <tr class="linha-dado linha-geoq" data-id="{g['id']}" data-busca="{busca}">
