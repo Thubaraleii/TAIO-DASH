@@ -701,11 +701,20 @@ def main():
     registros_geoq = carregar_geoquimica()
     print(f"  {len(registros_geoq)} amostras ({sum(1 for r in registros_geoq if r['lat'] is not None)} com coordenadas)")
     geoq_por_ponto = {r["ponto_id"]: r for r in registros_geoq if r["ponto_id"]}
+    # unifica a classificacao Ti: a geoquimica bruta real (QMC_TAIO_TODOS) e a
+    # fonte de verdade quando existe pro ponto -- sobrescreve o campo antigo
+    # do catalogo (ti_geoquimico, pontos_unificados_completo.gpkg), que podia
+    # estar desatualizado/faltando em relacao as 41 amostras reais. Sem isso
+    # o grafico "Classificação de Ti" ficava quase todo "Sem dado" mesmo pros
+    # pontos que ja tem amostra real cruzada.
+    MAPA_TI_GEOQ = {"Alto-Ti": "Alto", "Baixo-Ti": "Baixo"}
     for r in registros_campo:
         g = geoq_por_ponto.get(r["nome"])
         if g:
             r["geoq"] = {k: g[k] for k in ("SiO2", "TiO2", "Al2O3", "FeOT", "CaO", "MgO", "K2O", "Na2O", "P2O5",
                                             "Sr", "Zr", "Y", "Ti_Zr", "Zr_Y", "amostra")}
+            if g["classificacao_ti"] in MAPA_TI_GEOQ:
+                r["classificacao_ti"] = MAPA_TI_GEOQ[g["classificacao_ti"]]
     geoq_alto = [r for r in registros_geoq if r["classificacao_ti"] == "Alto-Ti"]
     geoq_baixo = [r for r in registros_geoq if r["classificacao_ti"] == "Baixo-Ti"]
 
@@ -809,6 +818,12 @@ def main():
     fig_lito_taio.update_xaxes(tickangle=-35)
 
     contagem_ti_taio = Counter((r["classificacao_ti"] or "Sem dado") for r in registros_campo)
+    # amostras de furo/referencia (QMC_TAIO_TODOS) nao correspondem a nenhum
+    # ponto do catalogo de campo (sem ponto_id) -- somadas aqui direto, senao
+    # ficariam de fora da contagem unificada de Alto/Baixo-Ti.
+    for g in registros_geoq:
+        if not g["ponto_id"]:
+            contagem_ti_taio[MAPA_TI_GEOQ.get(g["classificacao_ti"], "Sem dado")] += 1
     ordem_ti = ["Alto", "Baixo", "Sem dado"]
     itens_ti = [(k, contagem_ti_taio.get(k, 0)) for k in ordem_ti if contagem_ti_taio.get(k, 0)]
     fig_ti_taio = tema_grafico(go.Figure(go.Bar(
