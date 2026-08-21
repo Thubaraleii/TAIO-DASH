@@ -53,7 +53,12 @@ PONTOS_CAMPO_GPKG = (
     BASE.parent.parent / "2_Banco_de_Dados" / "Unificação" / "GPKG_Novos" / "pontos_unificados_completo.gpkg"
 )
 GEOQUIMICA_CSV = BASE.parent.parent / "2_Banco_de_Dados" / "QMC_TAIO_TODOS" / "geoquimica_dashboard.csv"
-POLIGON_INTRUSIVA_SHP = BASE.parent.parent / "2_Banco_de_Dados" / "dados_base" / "poligon_intrusiva.shp"
+# litologia_processada.shp (ETL: 2_Banco_de_Dados/scripts_etl/processar_litologia_atualizada.py)
+# substitui o mapa geologico real (CPRM) + o poligon_intrusiva.shp antigo --
+# um shp so, com sill/dique redigitalizados (coluna "formacao") e as 6
+# formacoes sedimentares, incl. deposito quaternario (coluna "tipo" ==
+# "sedimentar"/"intrusiva").
+LITOLOGIA_ATUALIZADA = BASE.parent.parent / "2_Banco_de_Dados" / "dados_base" / "litologia_processada.shp"
 TOPO_NPY = BASE.parent / "dados_entrada" / "topografia_drone" / "topografia_xyz.npy"
 
 # mesmo plano de mergulho regional + erosao contra o relevo real ja usado pra
@@ -85,6 +90,9 @@ COR_PAINEL = "#262B3D"
 
 COR_SILL = "#A63D2F"
 COR_DIQUE = "#1B4332"
+NOMES_CAMADAS = ["Teresina", "Serra Alta", "Irati", "Palermo", "Rio Bonito"]
+CORES_CAMADAS = ["#D6C79A", "#8C8C86", "#3E362C", "#B5AE93", "#C9A66B"]
+COR_QUATERNARIO = "#D9CB82"
 CORES_LITOLOGIA_CAMPO = {
     "sill_diabasio": COR_SILL, "sill_diabasio_cprm": COR_SILL,
     "dique": COR_DIQUE, "dique_cprm": COR_DIQUE,
@@ -243,10 +251,10 @@ def calcular_volume_sill_m3(grupo_sill, elevacao_fn, passo=80.0):
 def carregar_resumo_corpos(registros_geoq):
     resumo = {"sill_diabasio": {"nome": "Soleira (sill)", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0, "volume_km3": None},
               "dique": {"nome": "Dique", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0, "volume_km3": None}}
-    if POLIGON_INTRUSIVA_SHP.exists():
-        gdf = gpd.read_file(POLIGON_INTRUSIVA_SHP)
+    if LITOLOGIA_ATUALIZADA.exists():
+        gdf = gpd.read_file(LITOLOGIA_ATUALIZADA)
         mapa_tipo = {"Soleira": "sill_diabasio", "Dique": "dique"}
-        for tipo, grupo in gdf.groupby("tipo"):
+        for tipo, grupo in gdf.groupby("formacao"):
             chave = mapa_tipo.get(tipo)
             if not chave:
                 continue
@@ -302,6 +310,8 @@ def calcular_estatisticas_elementos():
         return [], []
     df = pd.read_csv(GEOQUIMICA_CSV)
 
+    tem_classificacao = "classificacao_ti" in df.columns
+
     def montar(lista_elementos):
         stats = []
         for coluna, label, unidade in lista_elementos:
@@ -310,10 +320,19 @@ def calcular_estatisticas_elementos():
             serie = df[coluna].dropna()
             if serie.empty:
                 continue
+            media_alto = media_baixo = None
+            if tem_classificacao:
+                serie_alto = df.loc[df["classificacao_ti"] == "Alto-Ti", coluna].dropna()
+                serie_baixo = df.loc[df["classificacao_ti"] == "Baixo-Ti", coluna].dropna()
+                if not serie_alto.empty:
+                    media_alto = float(serie_alto.mean())
+                if not serie_baixo.empty:
+                    media_baixo = float(serie_baixo.mean())
             stats.append({
                 "label": label, "unidade": unidade, "n": int(serie.count()),
                 "min": float(serie.min()), "media": float(serie.mean()),
                 "mediana": float(serie.median()), "max": float(serie.max()),
+                "media_alto": media_alto, "media_baixo": media_baixo,
             })
         return stats
 
@@ -781,13 +800,16 @@ def main():
         } for r in geoq_coord],
     }
 
-    # mapa geologico real (CPRM, 9 formacoes) -- mesma camada usada no
+    # mapa geologico atualizado (6 formacoes) -- mesma camada usada no
     # webmap dedicado (gerar_webmap_taio.py), pedido explicito do usuario
     # ("faltou o mapa geológico junto").
-    formacoes_path = BASE.parent.parent / "2_Banco_de_Dados" / "saida_processada" / "formacoes_cprm_poligonos.geojson"
+    CORES_LITOLOGIA_MAPA = dict(zip(NOMES_CAMADAS, CORES_CAMADAS))
+    CORES_LITOLOGIA_MAPA["Depósito quaternário"] = COR_QUATERNARIO
     geojson_formacoes = None
-    if formacoes_path.exists():
-        gdf_formacoes = gpd.read_file(formacoes_path).to_crs(4326)
+    if LITOLOGIA_ATUALIZADA.exists():
+        gdf_formacoes = gpd.read_file(LITOLOGIA_ATUALIZADA)
+        gdf_formacoes = gdf_formacoes[gdf_formacoes["tipo"] == "sedimentar"].to_crs(4326)
+        gdf_formacoes["cor"] = gdf_formacoes["formacao"].map(CORES_LITOLOGIA_MAPA).fillna("#CCCCCC")
         gdf_formacoes["popup"] = gdf_formacoes["formacao"]
         geojson_formacoes = json.loads(gdf_formacoes[["formacao", "cor", "popup", "geometry"]].to_json())
         print(f"  mapa geológico: {len(gdf_formacoes)} formações")
@@ -909,6 +931,8 @@ def main():
             pct_media = ((e["media"] - e["min"]) / faixa * 100) if faixa else 50
             pct_mediana = ((e["mediana"] - e["min"]) / faixa * 100) if faixa else 50
             casas = 2 if e["unidade"] == "%" else 1
+            txt_alto = f"{e['media_alto']:.{casas}f}" if e["media_alto"] is not None else "—"
+            txt_baixo = f"{e['media_baixo']:.{casas}f}" if e["media_baixo"] is not None else "—"
             linhas.append(f"""
             <tr>
                 <td>{e['label']}</td>
@@ -920,6 +944,8 @@ def main():
                     </div>
                 </td>
                 <td>{e['media']:.{casas}f} {e['unidade']}</td>
+                <td style="color:{COR_TI_ALTO}">{txt_alto}</td>
+                <td style="color:{COR_TI_BAIXO}">{txt_baixo}</td>
                 <td>{e['max']:.{casas}f}</td>
             </tr>""")
         return "".join(linhas)
@@ -1015,7 +1041,7 @@ def main():
   .leaflet-bar a:hover {{ background: {MARCA_ROXO}; }}
   #popup-info {{
     position: fixed; z-index: 2000; display: none; max-width: 320px;
-    background: {MARCA_ROXO_ESCURO}; border: 1px solid {MARCA_ROXO}; border-radius: 8px;
+    background: {MARCA_ROXO_ESCURO}; color: {MARCA_CINZA_CLARO}; border: 1px solid {MARCA_ROXO}; border-radius: 8px;
     padding: 10px 12px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); pointer-events: none;
   }}
   #popup-info b {{ color: {MARCA_CINZA_CLARO}; }}
@@ -1070,15 +1096,15 @@ def main():
       <h2>Apanhado estatístico — elementos químicos (41 amostras)</h2>
       <p class="subtitulo-estatistica">Óxidos maiores (% em peso)</p>
       <table class="tabela-resumo tabela-estatistica">
-        <thead><tr><th>Elemento</th><th>Mín</th><th>Distribuição</th><th>Média</th><th>Máx</th></tr></thead>
+        <thead><tr><th>Elemento</th><th>Mín</th><th>Distribuição</th><th>Média</th><th style="color:{COR_TI_ALTO}">Média Alto-Ti</th><th style="color:{COR_TI_BAIXO}">Média Baixo-Ti</th><th>Máx</th></tr></thead>
         <tbody>{estatisticas_oxidos_html}</tbody>
       </table>
       <p class="subtitulo-estatistica">Elementos traço (ppm)</p>
       <table class="tabela-resumo tabela-estatistica">
-        <thead><tr><th>Elemento</th><th>Mín</th><th>Distribuição</th><th>Média</th><th>Máx</th></tr></thead>
+        <thead><tr><th>Elemento</th><th>Mín</th><th>Distribuição</th><th>Média</th><th style="color:{COR_TI_ALTO}">Média Alto-Ti</th><th style="color:{COR_TI_BAIXO}">Média Baixo-Ti</th><th>Máx</th></tr></thead>
         <tbody>{estatisticas_tracos_html}</tbody>
       </table>
-      <p class="nota-resumo">Faixa vai do mínimo ao máximo observado · <span style="color:{MARCA_ROXO}">●</span> média · <span style="opacity:0.6">▏</span> mediana</p>
+      <p class="nota-resumo">Faixa vai do mínimo ao máximo observado · <span style="color:{MARCA_ROXO}">●</span> média · <span style="opacity:0.6">▏</span> mediana · médias por classificação Ti calculadas só sobre as amostras de cada grupo</p>
     </div>
   </div>
   <div class="painel">
@@ -1232,7 +1258,7 @@ def main():
         style: function(f) {{ return {{ color: '#000', weight: 0.5, fillColor: f.properties.cor, fillOpacity: 0.5 }}; }},
         onEachFeature: function(f, layer) {{ layer.bindPopup(f.properties.popup); }},
     }});
-    overlaysMapa["Mapa geológico real (CPRM)"] = formacoesLayer;"""
+    overlaysMapa["Mapa geológico atualizado"] = formacoesLayer;"""
     html_final += f"""
     L.control.layers(
         {{ "Escuro (CartoDB Dark)": escuro, "Rico (CartoDB Voyager)": rico, "Satélite (Esri)": satelite, "Relevo/Topográfico": relevo, "OSM Padrão": osmPadrao }},
