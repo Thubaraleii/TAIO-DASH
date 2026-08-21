@@ -805,14 +805,15 @@ def main():
     # ("faltou o mapa geológico junto").
     CORES_LITOLOGIA_MAPA = dict(zip(NOMES_CAMADAS, CORES_CAMADAS))
     CORES_LITOLOGIA_MAPA["Depósito quaternário"] = COR_QUATERNARIO
+    CORES_LITOLOGIA_MAPA["Soleira"] = COR_SILL
+    CORES_LITOLOGIA_MAPA["Dique"] = COR_DIQUE
     geojson_formacoes = None
     if LITOLOGIA_ATUALIZADA.exists():
-        gdf_formacoes = gpd.read_file(LITOLOGIA_ATUALIZADA)
-        gdf_formacoes = gdf_formacoes[gdf_formacoes["tipo"] == "sedimentar"].to_crs(4326)
+        gdf_formacoes = gpd.read_file(LITOLOGIA_ATUALIZADA).to_crs(4326)
         gdf_formacoes["cor"] = gdf_formacoes["formacao"].map(CORES_LITOLOGIA_MAPA).fillna("#CCCCCC")
         gdf_formacoes["popup"] = gdf_formacoes["formacao"]
         geojson_formacoes = json.loads(gdf_formacoes[["formacao", "cor", "popup", "geometry"]].to_json())
-        print(f"  mapa geológico: {len(gdf_formacoes)} formações")
+        print(f"  mapa geológico: {len(gdf_formacoes)} polígonos (incl. sill/dique)")
 
     # ------------------------------------------------------------
     # diagramas geoquimicos -- todos so com campos de referencia (sem
