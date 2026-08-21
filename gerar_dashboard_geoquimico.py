@@ -780,6 +780,18 @@ def main():
         } for r in campo_coord],
     }
 
+    # amostras de geoquimica bruta sem lat/lon proprio na planilha mas com
+    # ponto_id (ex.: ITC-44B) usam a coordenada do ponto de campo
+    # correspondente (ja convertida pra WGS84 acima) -- so as 3 "amostras de
+    # referencia" (sem ponto/corpo associado, coordenada real desconhecida)
+    # ficam mesmo de fora do mapa.
+    campo_por_nome = {r["nome"]: r for r in registros_campo}
+    for r in registros_geoq:
+        if r["lat"] is None and r["ponto_id"]:
+            c = campo_por_nome.get(r["ponto_id"])
+            if c and c.get("lat") is not None:
+                r["lat"], r["lon"] = c["lat"], c["lon"]
+
     # amostras de geoquimica bruta com coordenada (campo + furo -- furo tem
     # as 15 amostras na mesma coordenada de boca de furo, so a profundidade
     # muda; ainda assim cada uma vira um marcador, o popup mostra a profundidade)
