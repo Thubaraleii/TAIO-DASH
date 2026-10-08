@@ -104,6 +104,9 @@ COR_LITOLOGIA_PADRAO = "#999999"
 COR_TI_INDEFINIDO = "#9A9A9A"
 
 
+NOME_PONTO = {}  # ponto_id -> nome padrao ITC (preenchido em main)
+
+
 def txt(valor, padrao=""):
     """Converte valor de celula (pode ser pd.NA/None/nan) pra string segura --
     `pd.NA or ""` explode com TypeError, entao nao da pra usar `or` direto."""
@@ -135,7 +138,8 @@ def carregar_campo():
         desc = row.descricao_campo if pd.notna(row.descricao_campo) else ""
         registros.append({
             "id": f"CAMPO-{row.ponto_id}",
-            "nome": row.ponto_id,
+            "ponto_id": row.ponto_id,
+            "nome": row.nome_itc if "nome_itc" in gdf.columns and pd.notna(row.nome_itc) else row.ponto_id,  # padrao ITC
             "litologia": row.litologia_padronizada if pd.notna(row.litologia_padronizada) else "indefinido",
             "classificacao_ti": row.ti_geoquimico if pd.notna(row.ti_geoquimico) else None,
             "tipo_ponto": row.tipo_ponto if pd.notna(row.tipo_ponto) else "",
@@ -495,7 +499,7 @@ def trace_pontos_geoq(pontos, x_key, y_key, nome="Amostras Taió"):
         xs.append(x)
         ys.append(y)
         cores.append(p["cor"])
-        rotulo = p["amostra"] + (f" ({p['ponto_id']})" if p.get("ponto_id") else "")
+        rotulo = p["amostra"] + (f" ({NOME_PONTO.get(p['ponto_id'], p['ponto_id'])})" if p.get("ponto_id") and NOME_PONTO.get(p['ponto_id'], p['ponto_id']) != p["amostra"] else "")
         textos.append(rotulo)
         ids.append(p["id_display"])
     return go.Scatter(
@@ -569,7 +573,7 @@ def montar_afm(pontos=None):
                 continue
             xs_a.append(p["afm_a_F"]); xs_b.append(p["afm_b_A"]); xs_c.append(p["afm_c_M"])
             cores.append(p["cor"])
-            textos.append(p["amostra"] + (f" ({p['ponto_id']})" if p.get("ponto_id") else ""))
+            textos.append(p["amostra"] + (f" ({NOME_PONTO.get(p['ponto_id'], p['ponto_id'])})" if p.get("ponto_id") and NOME_PONTO.get(p['ponto_id'], p['ponto_id']) != p["amostra"] else ""))
             ids.append(p["id_display"])
         fig.add_trace(go.Scatterternary(
             a=xs_a, b=xs_b, c=xs_c, mode="markers", text=textos, hoverinfo="text", customdata=ids,
@@ -792,6 +796,7 @@ def registro_lista_geoq(g):
 def main():
     print("Carregando pontos de campo (Taió)...")
     registros_campo = carregar_campo()
+    NOME_PONTO.update({r["ponto_id"]: r["nome"] for r in registros_campo})
     print(f"  {len(registros_campo)} pontos")
 
     print("Carregando geoquímica bruta (QMC_TAIO_TODOS)...")
@@ -806,7 +811,7 @@ def main():
     # pontos que ja tem amostra real cruzada.
     MAPA_TI_GEOQ = {"Alto-Ti": "Alto", "Baixo-Ti": "Baixo"}
     for r in registros_campo:
-        g = geoq_por_ponto.get(r["nome"])
+        g = geoq_por_ponto.get(r["ponto_id"])
         if g:
             r["geoq"] = {k: g[k] for k in ("SiO2", "TiO2", "Al2O3", "FeOT", "CaO", "MgO", "K2O", "Na2O", "P2O5",
                                             "Sr", "Zr", "Y", "Ti_Zr", "Zr_Y", "amostra")}
@@ -857,7 +862,7 @@ def main():
     # correspondente (ja convertida pra WGS84 acima) -- so as 3 "amostras de
     # referencia" (sem ponto/corpo associado, coordenada real desconhecida)
     # ficam mesmo de fora do mapa.
-    campo_por_nome = {r["nome"]: r for r in registros_campo}
+    campo_por_nome = {r["ponto_id"]: r for r in registros_campo}
     for r in registros_geoq:
         if r["lat"] is None and r["ponto_id"]:
             c = campo_por_nome.get(r["ponto_id"])
@@ -976,7 +981,7 @@ def main():
     for r in registros_campo:
         linhas_tabela.append(f"""
         <tr class="linha-dado" data-id="{r['id']}"
-            data-busca="{(r['nome'] + ' ' + (r['litologia'] or '')).lower()}">
+            data-busca="{(r['nome'] + ' ' + r['ponto_id'] + ' ' + (r['litologia'] or '')).lower()}">
             <td><span class="dot-cor" style="background:{r['cor_mapa']}"></span><span class="nome-ponto">{r['nome']}</span></td>
             <td>{r['litologia'] or '—'}</td>
             <td>{r['classificacao_ti'] or '—'}</td>
