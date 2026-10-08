@@ -248,6 +248,78 @@ def calcular_volume_sill_m3(grupo_sill, elevacao_fn, passo=80.0):
     return volume_total
 
 
+PROFUNDIDADES_CAMADAS = [0.0, 350.0, 430.0, 485.0, 585.0, 854.0]  # topo/base de Teresina..Rio Bonito
+QUATERNARIO_LIMIAR_REAL = 450.0  # mesmo limiar/espessura do visualizador 3D e da secao 2D
+QUATERNARIO_ESPESSURA_REAL = 30.0
+
+
+def _cor_texto_sobre(hex_cor):
+    r, g, b = (int(hex_cor.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    return "#1B1F2E" if (0.299 * r + 0.587 * g + 0.114 * b) > 140 else "#F2F2F2"
+
+
+def calcular_colunas(registros):
+    """Coluna estratigrafica ESTIMADA em cada ponto (como um furo virtual):
+    mesmo modelo da secao 2D/visualizador 3D -- contato[0] = relevo real,
+    contatos de subsuperficie = plano de mergulho regional menos a
+    profundidade acumulada, "capados" pelo relevo (erosao); quaternario so
+    onde o relevo fica abaixo do limiar; sill (poligono) substitui o trecho
+    superior da coluna ate a base calculada; dique (poligono) vira uma barra
+    lateral atravessando a coluna toda. Devolve {id: {...}} pro JS."""
+    if not TOPO_NPY.exists() or not LITOLOGIA_ATUALIZADA.exists():
+        return {}, 0.0
+    xyz = np.load(TOPO_NPY)
+    linear = LinearNDInterpolator(xyz[:, :2], xyz[:, 2])
+    nearest = NearestNDInterpolator(xyz[:, :2], xyz[:, 2])
+
+    def elevacao_fn(x, y):
+        z = linear(x, y)
+        return float(z) if not np.isnan(z) else float(nearest(x, y))
+
+    gdf = gpd.read_file(LITOLOGIA_ATUALIZADA)
+    sill_geom = gdf[gdf["formacao"] == "Soleira"].geometry.union_all()
+    dique_geom = gdf[gdf["formacao"] == "Dique"].geometry.union_all()
+    cores = dict(zip(NOMES_CAMADAS, CORES_CAMADAS))
+
+    colunas, max_total = {}, 0.0
+    for r in registros:
+        if r.get("x") is None or r.get("y") is None:
+            continue
+        x, y = float(r["x"]), float(r["y"])
+        z = elevacao_fn(x, y)
+        tilt = Z_REF_TILT + TREND_A * (x - TREND_X0) + TREND_B * (y - TREND_Y0)
+        contatos = [z if m == 0 else min(tilt - PROFUNDIDADES_CAMADAS[m], z) for m in range(len(PROFUNDIDADES_CAMADAS))]
+        ponto = Point(x, y)
+        no_sill = sill_geom.contains(ponto)
+        no_dique = dique_geom.contains(ponto)
+
+        segs = []  # [nome, topo_m, base_m, cor]
+        if no_sill:
+            base_sill = max(ESPESSURA_MINIMA_SILL, z - elevacao_serra_alta(x, y, elevacao_fn))
+            segs.append(["Soleira (diabásio)", 0.0, base_sill, COR_SILL])
+            piso = base_sill
+        elif z <= QUATERNARIO_LIMIAR_REAL:
+            segs.append(["Depósito quaternário", 0.0, QUATERNARIO_ESPESSURA_REAL, COR_QUATERNARIO])
+            piso = QUATERNARIO_ESPESSURA_REAL
+        else:
+            piso = 0.0
+        for k, nome in enumerate(NOMES_CAMADAS):
+            topo, base = z - contatos[k], z - contatos[k + 1]
+            topo = max(topo, piso)
+            if base - topo > 0.5:
+                segs.append([nome, topo, base, cores[nome]])
+        total = z - contatos[-1]
+        max_total = max(max_total, total)
+        colunas[r["id"]] = {
+            "z": round(z), "total": round(total),
+            "segs": [[n, round(t), round(b), c, _cor_texto_sobre(c)] for n, t, b, c in segs],
+            "dique": bool(no_dique),
+            "d_sill": None if no_sill else round(sill_geom.distance(ponto)),
+            "d_dique": None if no_dique else round(dique_geom.distance(ponto)),
+        }
+    return colunas, max_total
+
+
 def carregar_resumo_corpos(registros_geoq):
     resumo = {"sill_diabasio": {"nome": "Soleira (sill)", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0, "volume_km3": None},
               "dique": {"nome": "Dique", "area_km2": 0.0, "n_poligonos": 0, "alto": 0, "baixo": 0, "volume_km3": None}}
@@ -894,6 +966,10 @@ def main():
     registros_geoq_sem_campo = [g for g in registros_geoq if not g["ponto_id"]]
     registros_geoq_lista = [registro_lista_geoq(g) for g in registros_geoq_sem_campo]
     dados_js = json.dumps(registros_campo + registros_geoq_lista, ensure_ascii=False)
+    print("Calculando colunas estratigráficas estimadas...")
+    colunas, max_total_coluna = calcular_colunas(registros_campo + registros_geoq_lista)
+    print(f"  {len(colunas)} colunas (profundidade máxima {max_total_coluna:.0f} m)")
+    colunas_js = json.dumps(colunas, ensure_ascii=False)
     logo_b64 = logo_base64()
 
     linhas_tabela = []
@@ -1057,6 +1133,20 @@ def main():
     background: {MARCA_ROXO_ESCURO}; color: {MARCA_CINZA_CLARO}; border: 1px solid {MARCA_ROXO}; border-radius: 8px;
     padding: 10px 12px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); pointer-events: none;
   }}
+  .coluna-corpo {{ display: flex; gap: 6px; padding: 12px 14px 14px 14px; align-items: flex-start; }}
+  .coluna-eixo {{ position: relative; width: 38px; flex: none; font-size: 10px; opacity: 0.7; }}
+  .coluna-eixo span {{ position: absolute; right: 4px; transform: translateY(-50%); }}
+  .coluna-pilha {{ position: relative; width: 210px; flex: none; border: 1px solid var(--borda-fraca); }}
+  .coluna-seg {{
+    position: absolute; left: 0; right: 0; box-sizing: border-box; overflow: hidden;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; font-size: 11px; line-height: 1.25; border-bottom: 1px solid rgba(255,255,255,0.55);
+  }}
+  .coluna-lado {{ position: relative; width: 14px; flex: none; }}
+  .coluna-dique {{ position: absolute; left: 3px; width: 8px; background: {COR_DIQUE}; border: 1px solid #000; }}
+  .coluna-info {{ flex: 1; font-size: 11px; line-height: 1.5; opacity: 0.9; min-width: 0; }}
+  .coluna-info .coluna-titulo {{ font-size: 13px; font-weight: 700; margin-bottom: 4px; }}
+  .coluna-vazia {{ padding: 14px; font-size: 12px; opacity: 0.7; }}
   #popup-info b {{ color: {MARCA_CINZA_CLARO}; }}
   #popup-info .linha-popup {{ margin: 2px 0; opacity: 0.9; }}
   #popup-info .titulo-popup {{ font-size: 13px; font-weight: 700; color: {MARCA_ROXO}; margin-bottom: 4px; }}
@@ -1094,6 +1184,10 @@ def main():
     </div>
   </div>
   <div class="painel col-graficos">
+    <div class="grafico-card painel-estatico">
+      <h2>Coluna estratigráfica estimada (furo virtual)</h2>
+      <div id="coluna-estrat"><div class="coluna-vazia">Selecione um ponto na lista ou no mapa para ver o empilhamento esperado ali.</div></div>
+    </div>
     <div class="grafico-card">{html_tas}</div>
     <div class="grafico-card">{html_afm}</div>
     <div class="grafico-card">{html_shand}</div>
@@ -1283,7 +1377,47 @@ def main():
         radius: 14, color: '{MARCA_ROXO}', weight: 3, fillOpacity: 0, opacity: 0,
     }}).addTo(mapa);
 
+    // coluna estratigrafica ESTIMADA do ponto selecionado (furo virtual) --
+    // blocos proporcionais a espessura, escala fixa (mesmo px/m pra todos os
+    // pontos, da pra comparar a profundidade entre eles).
+    var COLUNAS = {colunas_js};
+    var COLUNA_ALTURA_PX = 460, COLUNA_MAX_M = {max_total_coluna:.0f};
+    function atualizarColuna(id) {{
+        var alvo = document.getElementById('coluna-estrat');
+        var c = COLUNAS[id], r = DADOS_POR_ID[id];
+        if (!c) {{
+            alvo.innerHTML = '<div class="coluna-vazia">Sem coordenada para estimar a coluna deste item.</div>';
+            return;
+        }}
+        var pxm = COLUNA_ALTURA_PX / COLUNA_MAX_M;
+        var eixo = '', pilha = '';
+        for (var d = 0; d <= COLUNA_MAX_M; d += 100) {{
+            eixo += '<span style="top:' + (d * pxm) + 'px">' + d + '</span>';
+        }}
+        c.segs.forEach(function(s) {{
+            var h = (s[2] - s[1]) * pxm;
+            var rotulo = h >= 30 ? s[0] + '<br>' + s[1] + '–' + s[2] + ' m' : (h >= 15 ? s[0] : '');
+            pilha += '<div class="coluna-seg" title="' + s[0] + ': ' + s[1] + '–' + s[2] + ' m (' + (s[2] - s[1]) + ' m)" '
+                   + 'style="top:' + (s[1] * pxm) + 'px;height:' + h + 'px;background:' + s[3] + ';color:' + s[4] + '">'
+                   + rotulo + '</div>';
+        }});
+        var lado = c.dique
+            ? '<div class="coluna-dique" title="Dique (corpo subvertical, atravessa a coluna toda)" style="top:0;height:' + (c.total * pxm) + 'px"></div>'
+            : '';
+        var info = '<div class="coluna-titulo">' + (r ? r.nome : id) + '</div>'
+                 + 'Cota do terreno: ' + c.z + ' m<br>Profundidade modelada: ' + c.total + ' m'
+                 + (c.dique ? '<br><b>Dentro de polígono de dique</b> (barra verde ao lado)' : '')
+                 + (c.d_sill !== null ? '<br>Sill mais próximo: ' + (c.d_sill / 1000).toFixed(2) + ' km' : '')
+                 + (c.d_dique !== null ? '<br>Dique mais próximo: ' + (c.d_dique / 1000).toFixed(2) + ' km' : '')
+                 + '<br><br><span style="opacity:0.7">Estimativa pelo modelo da seção 2D: plano de mergulho regional + erosão contra o relevo; espessuras da literatura (Teresina 350, Serra Alta 80, Irati 55, Palermo 100, Rio Bonito 269 m). Não é furo real.</span>';
+        alvo.innerHTML = '<div class="coluna-corpo"><div class="coluna-eixo" style="height:' + COLUNA_ALTURA_PX + 'px">' + eixo + '</div>'
+                       + '<div class="coluna-pilha" style="height:' + (c.total * pxm) + 'px">' + pilha + '</div>'
+                       + '<div class="coluna-lado">' + lado + '</div>'
+                       + '<div class="coluna-info">' + info + '</div></div>';
+    }}
+
     function selecionarPorId(id, origemClique) {{
+        atualizarColuna(id);
         document.querySelectorAll('.linha-dado.selecionada').forEach(function(el) {{ el.classList.remove('selecionada'); }});
         var linha = document.querySelector('.linha-dado[data-id="' + id + '"]');
         if (linha) {{
