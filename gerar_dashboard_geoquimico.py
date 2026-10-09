@@ -88,17 +88,17 @@ MARCA_CINZA_CLARO = "#F2F2F2"
 MARCA_FONTE = "Montserrat, Arial, sans-serif"
 COR_PAINEL = "#262B3D"
 
-COR_SILL = "#A63D2F"
-COR_DIQUE = "#1B4332"
+COR_SILL = "#49B18C"
+COR_DIQUE = "#AFEC7C"
 NOMES_CAMADAS = ["Teresina", "Serra Alta", "Irati", "Palermo", "Rio Bonito"]
-CORES_CAMADAS = ["#D6C79A", "#8C8C86", "#3E362C", "#B5AE93", "#C9A66B"]
-COR_QUATERNARIO = "#D9CB82"
+CORES_CAMADAS = ["#F8B6A0", "#FB8D74", "#C8625D", "#FF7757", "#E3644F"]  # paleta do mapa geologico (Teresina, Serra Alta, Irati, Palermo, Rio Bonito)
+COR_QUATERNARIO = "#FFFBC2"
 CORES_LITOLOGIA_CAMPO = {
     "sill_diabasio": COR_SILL, "sill_diabasio_cprm": COR_SILL,
     "dique": COR_DIQUE, "dique_cprm": COR_DIQUE,
-    "encaixante_teresina": "#D6C79A", "encaixante_serra_alta": "#8C8C86",
-    "encaixante_irati": "#3E362C", "encaixante_palermo": "#B5AE93",
-    "encaixante_rio_bonito": "#C9A66B", "encaixante_sedimentar": "#999999",
+    "encaixante_teresina": "#F8B6A0", "encaixante_serra_alta": "#FB8D74",
+    "encaixante_irati": "#C8625D", "encaixante_palermo": "#FF7757",
+    "encaixante_rio_bonito": "#E3644F", "encaixante_sedimentar": "#999999",
 }
 COR_LITOLOGIA_PADRAO = "#999999"
 COR_TI_INDEFINIDO = "#9A9A9A"
