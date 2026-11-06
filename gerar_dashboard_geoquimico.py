@@ -401,50 +401,6 @@ def calcular_estatisticas_elementos():
     return montar(ELEMENTOS_OXIDOS), montar(ELEMENTOS_TRACOS)
 
 
-# ======================================================================
-# 2. suavizacao de poligonos (campos de literatura) -- Catmull-Rom, mesma
-#    tecnica portada do notebook GeoQMASTER_VF.ipynb do usuario.
-# ======================================================================
-def suavizar_poligono_catmull_rom(pontos, n_interpolacao=25):
-    pontos = np.array(pontos, dtype=float)
-    pts = np.vstack([pontos[-2], pontos[-1], pontos, pontos[0], pontos[1]])
-    curva = []
-    for i in range(2, len(pts) - 2):
-        p0, p1, p2, p3 = pts[i - 1], pts[i], pts[i + 1], pts[i + 2]
-        for t in np.linspace(0, 1, n_interpolacao):
-            t2, t3 = t * t, t * t * t
-            ponto = 0.5 * (
-                (2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
-                + (-p0 + 3 * p1 - 3 * p2 + p3) * t3
-            )
-            curva.append(ponto)
-    return np.array(curva)
-
-
-def montar_shapes_campos(campos, n_interpolacao=25, suavizar=True):
-    """Devolve (lista de go.Scatter preenchidos, lista de anotacoes) pros
-    campos de literatura de um diagrama. suavizar=False desenha o poligono
-    cru (usado pros retangulos da Tabela 1 -- arestas retas comunicam
-    "intervalo numerico publicado", nao um contorno organico digitalizado)."""
-    traces, anotacoes = [], []
-    for nome, info in campos.items():
-        if suavizar:
-            curva = suavizar_poligono_catmull_rom(info["coords"], n_interpolacao=n_interpolacao)
-            xs, ys = curva[:, 0].tolist(), curva[:, 1].tolist()
-        else:
-            xs, ys = [p[0] for p in info["coords"]], [p[1] for p in info["coords"]]
-        traces.append(go.Scatter(
-            x=xs + [xs[0]], y=ys + [ys[0]],
-            mode="lines", fill="toself", fillcolor=info["cor"], opacity=0.55 if not suavizar else 0.72,
-            line=dict(color="black", width=1.2), hoverinfo="skip", showlegend=False,
-        ))
-        anotacoes.append(dict(
-            x=info["label"][0], y=info["label"][1], xref="x", yref="y",
-            text=f"<b>{nome}</b>", showarrow=False, font=dict(size=10 if not suavizar else 11, color="black"),
-        ))
-    return traces, anotacoes
-
-
 def tema_grafico(fig, titulo, altura=340, nota=None):
     fig.update_layout(
         paper_bgcolor=MARCA_NAVY, plot_bgcolor=COR_PAINEL, height=altura + (26 if nota else 0),
@@ -468,7 +424,6 @@ def tema_grafico(fig, titulo, altura=340, nota=None):
 
 
 NOTA_SEM_DADO = "Só campos de referência — Taió ainda não tem óxido/traço bruto pra plotar"
-NOTA_APROXIMADO = NOTA_SEM_DADO + " · campos digitalizados aproximados (Fontoura, TCC 2024, Fig.12/33 · Peate et al. 1997)"
 NOTA_COM_DADO = "41 amostras (QMC_TAIO_TODOS) · campos de referência digitalizados aproximados (Fontoura, TCC 2024 · Peate et al. 1997)"
 
 
@@ -603,158 +558,6 @@ def montar_shand(pontos=None):
     return tema_grafico(fig, "Shand's Index — A/NK × A/CNK", nota=NOTA_COM_DADO if pontos else NOTA_SEM_DADO)
 
 
-# ======================================================================
-# 4. campos de magma-tipo -- fonte: Fontoura, G.M. (TCC UFSC, 2024),
-#    "Geologia, petrografia e geoquímica elemental dos diques máficos do
-#    Farol de Santa Marta, SC" (Figura 12, p.46, "Modificado de Peate et
-#    al., 1997") e Tabela 1 (p.43, "Peate et al., 1992").
-#
-#    Painel I (MgO×TiO2, Ti/Y×Ti/Zr) no original mostra campos suaves
-#    (blob) -- vertices digitalizados a olho na imagem extraida do PDF
-#    (melhor resolucao que o print enviado, mas ainda aproximado, nao sao
-#    coordenadas numericas publicadas).
-#
-#    Paineis II/III (Fe2O3×TiO2, Zr/Y×Sr, Zr/Y×Ti/Zr, Sr×Ti/Y) no original
-#    mostram NUVENS DE PONTOS (amostras de referencia), nao campos --
-#    como nao ha como digitalizar pontos individuais com precisao, uso os
-#    INTERVALOS NUMERICOS PUBLICADOS na Tabela 1 (Peate et al. 1992) como
-#    retangulo de referencia (min/max de cada eixo por magma-tipo) -- mais
-#    fiel ao dado real citavel do que tentar desenhar a nuvem por olho.
-# ======================================================================
-CAMPOS_MGO_TIO2 = {
-    "Urubici": {"cor": "#B4D900", "label": (3.75, 4.3), "coords": [
-        (3.0, 3.3), (3.1, 3.9), (3.4, 4.3), (3.9, 4.5), (4.3, 4.3), (4.5, 3.9),
-        (4.3, 3.4), (3.9, 3.15), (3.4, 3.1),
-    ]},
-    "Pitanga": {"cor": "#E6951A", "label": (4.35, 3.6), "coords": [
-        (3.5, 2.9), (3.6, 3.4), (3.9, 3.8), (4.4, 4.0), (4.9, 3.85), (5.2, 3.4),
-        (5.0, 2.95), (4.5, 2.7), (4.0, 2.65),
-    ]},
-    "Paranapanema": {"cor": "#B9D7F0", "label": (4.6, 2.05), "coords": [
-        (2.8, 1.75), (2.9, 2.1), (3.3, 2.45), (4.0, 2.6), (4.8, 2.55), (5.5, 2.35),
-        (6.1, 2.05), (6.4, 1.75), (6.0, 1.55), (5.2, 1.5), (4.2, 1.55), (3.4, 1.6), (2.9, 1.65),
-    ]},
-    "Ribeira": {"cor": "#8791D0", "label": (2.9, 2.1), "coords": [
-        (2.55, 2.0), (2.6, 2.25), (2.9, 2.35), (3.25, 2.25), (3.3, 2.0), (3.0, 1.9), (2.7, 1.9),
-    ]},
-    "Esmeralda": {"cor": "#10962F", "label": (5.6, 1.4), "coords": [
-        (4.2, 1.15), (4.4, 1.55), (4.9, 1.85), (5.6, 1.95), (6.3, 1.8), (6.8, 1.5),
-        (6.9, 1.15), (6.5, 0.95), (5.8, 0.9), (5.0, 0.9), (4.5, 0.95),
-    ]},
-    "Gramado": {"cor": "#D62728", "label": (5.5, 0.95), "coords": [
-        (2.6, 0.85), (2.65, 1.15), (2.9, 1.4), (3.4, 1.55), (4.0, 1.5), (4.6, 1.35),
-        (5.2, 1.25), (5.8, 1.2), (6.5, 1.15), (7.3, 1.05), (8.0, 0.95), (8.6, 0.85),
-        (8.8, 0.7), (8.3, 0.55), (7.3, 0.5), (6.0, 0.5), (4.8, 0.55), (3.7, 0.6), (2.9, 0.65),
-    ]},
-}
-CAMPOS_TIY_TIZR = {
-    "Ribeira": {"cor": "#8791D0", "label": (282, 87), "coords": [
-        (260, 82), (270, 90), (285, 92), (300, 88), (305, 80), (295, 73), (278, 72), (265, 76),
-    ]},
-    "Paranapanema": {"cor": "#B9D7F0", "label": (355, 92), "coords": [
-        (300, 65), (305, 80), (315, 90), (335, 96), (360, 97), (385, 93), (400, 85),
-        (405, 75), (395, 68), (370, 64), (340, 62), (315, 62),
-    ]},
-    "Pitanga": {"cor": "#E6951A", "label": (520, 90), "coords": [
-        (400, 66), (410, 80), (430, 90), (460, 96), (500, 98), (550, 96), (600, 90),
-        (635, 80), (645, 70), (630, 65), (590, 63), (540, 62), (480, 62), (430, 63),
-    ]},
-    "Urubici": {"cor": "#B4D900", "label": (580, 70), "coords": [
-        (480, 60), (490, 68), (510, 74), (540, 76), (580, 75), (620, 72), (655, 68),
-        (670, 63), (655, 58), (610, 56), (560, 56), (510, 57),
-    ]},
-    "Esmeralda": {"cor": "#10962F", "label": (225, 70), "coords": [
-        (195, 58), (200, 68), (220, 76), (245, 78), (258, 72), (255, 63), (240, 58), (215, 55),
-    ]},
-    "Gramado": {"cor": "#D62728", "label": (205, 45), "coords": [
-        (175, 37), (180, 45), (195, 52), (215, 57), (230, 55), (235, 48), (225, 40), (205, 35), (185, 33),
-    ]},
-}
-
-# Paineis C/D/E/F -- digitalizados da FIGURA 33 (p.89 do TCC, "Fonte: Do
-# autor, 2024"), nao mais da Figura 12/Tabela 1. A Fig.33 e a reproducao do
-# proprio autor com os MESMOS campos suaves (organicos) da Fig.12, so que
-# com as amostras dele plotadas por cima -- exportei a imagem embutida no
-# PDF em resolucao alta (bem melhor que o print originalmente enviado) e
-# digitalizei os vertices dos campos direto dela. Ainda e aproximado (nao
-# sao coordenadas numericas publicadas), mas com uma fonte de imagem bem
-# mais nitida que antes.
-CAMPOS_C_FE2O3_TIO2 = {
-    "Paranapanema": {"cor": "#B5B5B5", "label": (2.2, 15.5), "coords": [
-        (1.5, 13), (1.6, 14.5), (1.9, 16.2), (2.3, 17.5), (2.8, 17.3), (3.1, 16),
-        (3.2, 14.5), (3.0, 13), (2.5, 12.3), (1.9, 12.5),
-    ]},
-    "Pitanga": {"cor": "#E6951A", "label": (3.5, 15), "coords": [
-        (2.9, 13), (3.0, 14.5), (3.3, 16), (3.7, 17.3), (4.0, 16.8), (4.1, 15),
-        (4.0, 13.3), (3.6, 12.3), (3.2, 12.3),
-    ]},
-    "Urubici": {"cor": "#B4D900", "label": (3.8, 13.2), "coords": [
-        (3.3, 12.8), (3.4, 13.5), (3.7, 14), (4.0, 13.9), (4.2, 13.3), (4.3, 12.5),
-        (4.0, 11.8), (3.6, 11.7), (3.4, 12.2),
-    ]},
-}
-CAMPOS_D_ZRY_SR = {
-    "Paranapanema": {"cor": "#B5B5B5", "label": (280, 5.0), "coords": [
-        (150, 4.7), (160, 5.2), (200, 5.5), (280, 5.4), (350, 5.0), (400, 4.7),
-        (420, 4.5), (350, 4.4), (250, 4.4), (180, 4.5),
-    ]},
-    "Pitanga": {"cor": "#E6951A", "label": (520, 6.8), "coords": [
-        (380, 5.5), (400, 6.2), (430, 7.0), (480, 7.6), (550, 7.8), (620, 7.5),
-        (650, 7.0), (630, 6.2), (560, 5.7), (480, 5.5), (420, 5.4),
-    ]},
-    "Urubici": {"cor": "#B4D900", "label": (820, 8.3), "coords": [
-        (550, 7.6), (570, 8.2), (620, 8.7), (700, 9.0), (800, 9.1), (900, 8.8),
-        (1000, 8.3), (1080, 7.8), (1100, 7.3), (1000, 7.3), (880, 7.4), (750, 7.5),
-        (650, 7.4), (590, 7.4),
-    ]},
-}
-CAMPOS_E_ZRY_TIZR = {
-    "Gramado": {"cor": "#D62728", "label": (50, 4.6), "coords": [
-        (33, 3.9), (35, 4.3), (40, 4.9), (46, 5.3), (52, 5.5), (58, 5.3), (62, 4.9),
-        (65, 4.4), (68, 3.9), (63, 3.6), (55, 3.6), (45, 3.7), (38, 3.7),
-    ]},
-    "Esmeralda": {"cor": "#10962F", "label": (70, 3.7), "coords": [
-        (58, 3.6), (60, 4.0), (65, 4.2), (70, 4.3), (76, 4.1), (80, 3.8), (83, 3.5),
-        (80, 3.2), (74, 3.1), (66, 3.15), (60, 3.3),
-    ]},
-    "Ribeira": {"cor": "#8791D0", "label": (85, 3.9), "coords": [
-        (63, 3.7), (65, 4.0), (70, 4.3), (78, 4.4), (88, 4.3), (96, 4.1), (100, 3.8),
-        (97, 3.5), (88, 3.4), (78, 3.4), (70, 3.45),
-    ]},
-}
-CAMPOS_F_SR_TIY = {
-    "Gramado": {"cor": "#D62728", "label": (225, 240), "coords": [
-        (150, 155), (155, 190), (165, 240), (180, 280), (200, 315), (225, 330),
-        (250, 320), (270, 290), (285, 250), (295, 210), (300, 175), (285, 150),
-        (255, 140), (220, 140), (185, 145), (165, 148),
-    ]},
-    "Esmeralda": {"cor": "#10962F", "label": (270, 175), "coords": [
-        (220, 150), (225, 175), (240, 200), (260, 213), (285, 210), (305, 195),
-        (315, 175), (310, 155), (290, 143), (260, 140), (235, 143),
-    ]},
-    "Ribeira": {"cor": "#8791D0", "label": (430, 260), "coords": [
-        (270, 175), (280, 220), (300, 270), (330, 310), (370, 335), (420, 342),
-        (470, 330), (510, 300), (535, 260), (545, 220), (535, 190), (505, 168),
-        (460, 158), (410, 158), (360, 162), (315, 167),
-    ]},
-}
-
-
-def montar_diagrama_campos(campos, titulo, x_titulo, y_titulo, x_range, y_range, suavizar=True,
-                            nota=NOTA_APROXIMADO, pontos=None, x_key=None, y_key=None):
-    fig = go.Figure()
-    campos_traces, anotacoes = montar_shapes_campos(campos, suavizar=suavizar)
-    for t in campos_traces:
-        fig.add_trace(t)
-    fig.update_layout(annotations=anotacoes)
-    if pontos and x_key and y_key:
-        fig.add_trace(trace_pontos_geoq(pontos, x_key, y_key))
-        nota = nota.split(" · campos digitalizados")[0] + " · amostras Taió sobrepostas (QMC_TAIO_TODOS) · campos digitalizados aproximados (Fontoura, TCC 2024, Fig.12/33 · Peate et al. 1997)"
-    fig.update_xaxes(title_text=x_titulo, range=x_range)
-    fig.update_yaxes(title_text=y_titulo, range=y_range)
-    return tema_grafico(fig, titulo, nota=nota)
-
-
 def registro_lista_geoq(g):
     """Converte uma amostra de geoquimica bruta pro mesmo formato dos
     registros de campo, pra poder entrar na lista/DADOS_POR_ID e ficar
@@ -777,6 +580,219 @@ def registro_lista_geoq(g):
     if g["lat"] is not None and g["lon"] is not None:
         r["lat"], r["lon"] = g["lat"], g["lon"]
     return r
+
+
+# ======================================================================
+# Critérios de Peate et al. (1992), matrizes de conformidade, ETR (manto primitivo),
+# discriminação tectônica (Ti/V) e Harker -- todos a partir da planilha QMC
+# (QMC Taio + Furos.xlsx), classificação Alto/Baixo-Ti vinda do CSV do dashboard.
+# Janelas dos 12 critérios copiadas de Peate et al. (1992) -- NAO alterar.
+# ======================================================================
+QMC_XLSX = GEOQUIMICA_CSV.parent / "QMC Taio + Furos.xlsx"
+
+CRITERIOS_PEATE = {
+    'Urubici':      {'SiO2': (49, None), 'TiO2': (3.3, None), 'P2O5': (0.45, None), 'Fe2O3t': (None, 14.5),
+                     'Sr': (550, None), 'Ba': (500, None), 'Zr': (250, None),
+                     'TiZr': (57, None), 'TiY': (500, None), 'ZrY': (6.5, None), 'SrY': (14, None), 'BaY': (14, None)},
+    'Pitanga':      {'SiO2': (47, None), 'TiO2': (2.8, None), 'P2O5': (0.35, None), 'Fe2O3t': (12.5, 18),
+                     'Sr': (350, None), 'Ba': (200, None), 'Zr': (200, None),
+                     'TiZr': (60, None), 'TiY': (350, None), 'ZrY': (5.5, None), 'SrY': (8, None), 'BaY': (9, None)},
+    'Paranapanema': {'SiO2': (48, 53), 'TiO2': (1.7, 3.2), 'P2O5': (0.2, 0.8), 'Fe2O3t': (12.5, 17),
+                     'Sr': (200, 450), 'Ba': (200, 650), 'Zr': (120, 250),
+                     'TiZr': (65, None), 'TiY': (350, None), 'ZrY': (4.0, 7.0), 'SrY': (4.5, 15), 'BaY': (5, 19)},
+    'Ribeira':      {'SiO2': (49, 52), 'TiO2': (1.5, 2.3), 'P2O5': (0.15, 0.50), 'Fe2O3t': (12, 16),
+                     'Sr': (200, 375), 'Ba': (200, 600), 'Zr': (100, 200),
+                     'TiZr': (65, None), 'TiY': (300, None), 'ZrY': (3.5, 7.0), 'SrY': (5, 17), 'BaY': (6, 19)},
+    'Esmeralda':    {'SiO2': (48, 55), 'TiO2': (1.1, 2.3), 'P2O5': (0.1, 0.35), 'Fe2O3t': (12, 17),
+                     'Sr': (None, 250), 'Ba': (90, 400), 'Zr': (65, 210),
+                     'TiZr': (60, None), 'TiY': (None, 330), 'ZrY': (2.0, 5.0), 'SrY': (None, 9), 'BaY': (None, 12)},
+    'Gramado':      {'SiO2': (49, 60), 'TiO2': (0.7, 2.0), 'P2O5': (0.05, 0.40), 'Fe2O3t': (9, 16),
+                     'Sr': (140, 400), 'Ba': (100, 700), 'Zr': (65, 275),
+                     'TiZr': (None, 70), 'TiY': (None, 330), 'ZrY': (3.5, 6.5), 'SrY': (None, 13), 'BaY': (None, 19)},
+}
+ORDEM_TIPOS = ['Urubici', 'Pitanga', 'Paranapanema', 'Ribeira', 'Esmeralda', 'Gramado']
+ORDEM_CRITERIOS = ['SiO2', 'TiO2', 'P2O5', 'Fe2O3t', 'Sr', 'Ba', 'Zr', 'TiZr', 'TiY', 'ZrY', 'SrY', 'BaY']
+TIPOS_GRUPO = {"Alto-Ti": ['Urubici', 'Pitanga', 'Paranapanema'], "Baixo-Ti": ['Ribeira', 'Esmeralda', 'Gramado']}
+# tipos de alto-Ti em laranjas, de baixo-Ti em azuis (paleta do artigo)
+COR_TIPO = {'Urubici': '#B35900', 'Pitanga': '#E8820C', 'Paranapanema': '#F6B76B',
+            'Ribeira': '#2F6FA8', 'Esmeralda': '#5BA3D9', 'Gramado': '#1B4F7A'}
+ROTULO_CRITERIO = {
+    'SiO2': "SiO₂ (% peso)", 'TiO2': "TiO₂ (% peso)", 'P2O5': "P₂O₅ (% peso)", 'Fe2O3t': "Fe₂O₃(t) (% peso)",
+    'Sr': "Sr (ppm)", 'Ba': "Ba (ppm)", 'Zr': "Zr (ppm)", 'TiZr': "Ti/Zr", 'TiY': "Ti/Y", 'ZrY': "Zr/Y",
+    'SrY': "Sr/Y", 'BaY': "Ba/Y",
+}
+# manto primitivo (McDonough & Sun, 1995), ppm
+ETR_ELEMENTOS = ['La', 'Ce', 'Pr', 'Nd', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu']
+MANTO_PRIMITIVO = {'La': 0.648, 'Ce': 1.675, 'Pr': 0.254, 'Nd': 1.250, 'Sm': 0.406, 'Eu': 0.154, 'Gd': 0.544,
+                   'Tb': 0.099, 'Dy': 0.674, 'Ho': 0.149, 'Er': 0.438, 'Tm': 0.068, 'Yb': 0.441, 'Lu': 0.0675}
+HARKER_Y = [('TiO2', "TiO₂"), ('Al2O3', "Al₂O₃"), ('Fe2O3t', "Fe₂O₃(t)"), ('MgO', "MgO"), ('CaO', "CaO"),
+            ('Na2O', "Na₂O"), ('K2O', "K₂O"), ('P2O5', "P₂O₅")]
+NOTA_PEATE = "Peate et al. (1992) · faixas = janelas de cada magma-tipo · QMC_TAIO_TODOS"
+
+
+def carregar_dados_peate(registros_geoq):
+    """Planilha QMC + campos derivados (formulas da metodologia) + Alto/Baixo-Ti e
+    id do dashboard (pra clique sincronizar com lista/mapa)."""
+    df = pd.read_excel(QMC_XLSX, sheet_name="Planilha1")
+    df = df[df["SAMPLE NAME"].notna()].copy()
+    df["amostra"] = df["SAMPLE NAME"].astype(str).str.strip()
+    por_nome = {r["amostra"]: r for r in registros_geoq}
+    df = df[df["amostra"].isin(por_nome)].copy()
+    df["classe"] = df["amostra"].map(lambda a: por_nome[a]["classificacao_ti"])
+    df["id"] = df["amostra"].map(lambda a: por_nome[a]["id_display"])
+    df["cor"] = df["amostra"].map(lambda a: por_nome[a]["cor"])
+    df["SiO2"], df["TiO2"], df["Al2O3"] = df["SiO2_pct"], df["TiO2_pct"], df["Al2O3"]
+    df["MgO"], df["CaO"], df["Na2O"], df["K2O"], df["P2O5"] = df["MgO_pct"], df["CaO_pct"], df["Na2O_pct"], df["K2O_pct"], df["P2O5_pct"]
+    df["Fe2O3t"] = df["FeOT_pct"] * 1.1113
+    df["Ti_ppm"] = df["TiO2_pct"] * 5990.0
+    df["Sr"], df["Ba"], df["Zr"], df["Y"] = df["Sr_ppm"], df["Ba_ppm"], df["Zr_ppm"], df["Y_ppm"]
+    df["TiZr"], df["TiY"] = df["Ti_ppm"] / df["Zr"], df["Ti_ppm"] / df["Y"]
+    df["ZrY"], df["SrY"], df["BaY"] = df["Zr"] / df["Y"], df["Sr"] / df["Y"], df["Ba"] / df["Y"]
+    return df.reset_index(drop=True)
+
+
+def _dentro(valor, janela):
+    lo, hi = janela
+    return (lo is None or valor >= lo) and (hi is None or valor <= hi)
+
+
+def pontuacao_peate(df):
+    """Pontos 0-12 por amostra x tipo: 1 por criterio dentro da janela do tipo."""
+    return pd.DataFrame({
+        tipo: [sum(_dentro(row[c], CRITERIOS_PEATE[tipo][c]) for c in ORDEM_CRITERIOS) for _, row in df.iterrows()]
+        for tipo in ORDEM_TIPOS
+    }, index=df["amostra"])
+
+
+def trace_amostras(df, x, y, **extra):
+    return go.Scatter(
+        x=x, y=y, mode="markers", name="Amostras Taió", text=df["amostra"], customdata=df["id"], hoverinfo="text+y",
+        marker=dict(size=8, color=df["cor"], line=dict(width=1, color="#071729")), showlegend=False, **extra,
+    )
+
+
+def montar_criterio_peate(df, crit):
+    """Um criterio: valor de cada amostra (ordenadas por grupo e valor) com as janelas dos 6 tipos ao fundo."""
+    d = df.sort_values(["classe", crit]).reset_index(drop=True)
+    vals = d[crit].astype(float)
+    finitos = [v for t in ORDEM_TIPOS for v in CRITERIOS_PEATE[t][crit] if v is not None]
+    lo = min([vals.min()] + finitos)
+    hi = max([vals.max()] + finitos)
+    folga = (hi - lo) * 0.06 or 1.0
+    y0, y1 = lo - folga, hi + folga
+    fig = go.Figure()
+    shapes = []
+    for tipo in ORDEM_TIPOS:
+        jmin, jmax = CRITERIOS_PEATE[tipo][crit]
+        a, b = (y0 if jmin is None else jmin), (y1 if jmax is None else jmax)
+        cor = COR_TIPO[tipo]
+        shapes.append(dict(type="rect", xref="paper", x0=0, x1=1, yref="y", y0=a, y1=b, fillcolor=cor, opacity=0.14,
+                           line=dict(width=0), layer="below"))
+        for yy in (jmin, jmax):
+            if yy is not None:
+                shapes.append(dict(type="line", xref="paper", x0=0, x1=1, yref="y", y0=yy, y1=yy,
+                                   line=dict(color=cor, width=1, dash="dot"), layer="below"))
+        # trace invisivel so pra hover da janela
+        fig.add_trace(go.Scatter(x=[0.5], y=[(a + b) / 2], mode="markers", marker=dict(size=0.1, color=cor), xaxis="x2",
+                                 showlegend=False, hoverinfo="text", text=[f"{tipo}: {jmin if jmin is not None else '—'} a {jmax if jmax is not None else '—'}"]))
+    fig.add_trace(trace_amostras(d, list(range(len(d))), vals))
+    fig.update_layout(shapes=shapes, xaxis2=dict(overlaying="x", range=[0, 1], visible=False))
+    fig.update_xaxes(showticklabels=False, range=[-1, len(d)], title_text="amostras (Alto-Ti → Baixo-Ti)")
+    fig.update_yaxes(title_text=ROTULO_CRITERIO[crit], range=[y0, y1])
+    tema_grafico(fig, ROTULO_CRITERIO[crit], altura=250)
+    fig.update_layout(margin=dict(l=48, r=10, t=36, b=42), title=dict(font=dict(size=12)), hovermode="closest")
+    return fig
+
+
+def montar_matriz_conformidade(df, pont, grupo):
+    """Heatmap amostras x tipos do proprio grupo (nao reclassifica Alto-Ti contra tipos de Baixo-Ti)."""
+    tipos = TIPOS_GRUPO[grupo]
+    sel = df[df["classe"] == grupo]
+    sub = pont.loc[sel["amostra"], tipos]
+    ordem = sub.assign(_m=sub.max(axis=1), _s=sub.sum(axis=1)).sort_values(["_m", "_s"], ascending=False).index
+    sub = sub.loc[ordem]
+    ids = sel.set_index("amostra").loc[ordem, "id"].tolist()
+    cor_max = "#e8820c" if grupo == "Alto-Ti" else "#2f6fa8"
+    fig = go.Figure(go.Heatmap(
+        z=sub.values, x=tipos, y=list(sub.index), customdata=[[i] * len(tipos) for i in ids],
+        colorscale=[[0, "#ffffff"], [1, cor_max]], zmin=0, zmax=12, xgap=2, ygap=2,
+        text=sub.values, texttemplate="%{text}", textfont=dict(size=10, color="#111"),
+        colorbar=dict(title="/12", thickness=10, len=0.6), hovertemplate="%{y} · %{x}: %{z}/12<extra></extra>",
+    ))
+    fig.update_yaxes(autorange="reversed", type="category", tickfont=dict(size=9))
+    fig.update_xaxes(side="top", type="category")
+    tema_grafico(fig, f"Conformidade com os 6 critérios de Peate — {grupo} ({len(sub)} amostras)", altura=max(260, 17 * len(sub) + 90),
+                 nota="pontos = nº de critérios (0–12) dentro da janela de cada magma-tipo do grupo · ordenado pela melhor pontuação")
+    fig.update_layout(margin=dict(l=62, r=20, t=70, b=70))
+    return fig
+
+
+def montar_etr(df):
+    completos = df.dropna(subset=[f"{e}_ppm" for e in ETR_ELEMENTOS])
+    fig = go.Figure()
+    vistos = set()
+    for _, r in completos.iterrows():
+        y = [r[f"{e}_ppm"] / MANTO_PRIMITIVO[e] for e in ETR_ELEMENTOS]
+        fig.add_trace(go.Scatter(
+            x=ETR_ELEMENTOS, y=y, mode="lines+markers", name=r["classe"], legendgroup=r["classe"],
+            showlegend=r["classe"] not in vistos, text=[r["amostra"]] * len(y), customdata=[r["id"]] * len(y),
+            hovertemplate="%{text} · %{x}: %{y:.1f}×MP<extra></extra>", line=dict(color=r["cor"], width=1.3),
+            marker=dict(size=4, color=r["cor"]), opacity=0.8,
+        ))
+        vistos.add(r["classe"])
+    fig.update_yaxes(type="log", title_text="Amostra / manto primitivo")
+    fig.update_xaxes(title_text="Elementos terras raras")
+    tema_grafico(fig, f"Padrões de ETR normalizados ao manto primitivo ({len(completos)} amostras)", altura=360,
+                 nota="normalização: manto primitivo, McDonough & Sun (1995) · só amostras com os 14 ETR analisados")
+    return fig
+
+
+def montar_ti_v(df):
+    """Discriminação tectônica Ti/V (Shervais, 1982): Ti/1000 x V."""
+    fig = go.Figure()
+    vmax = max(650, float(df["V_ppm"].max()) * 1.1)
+    for razao, rot in ((10, "10"), (20, "20"), (50, "50"), (100, "100")):
+        fig.add_trace(go.Scatter(x=[0, vmax], y=[0, razao * vmax / 1000], mode="lines", showlegend=False, hoverinfo="skip",
+                                 line=dict(color="#8A94A6", width=1, dash="dot")))
+    ymax = max(df["Ti_ppm"].max() / 1000 * 1.15, 50 * vmax / 1000 * 0.35)
+    campos = [(0.8 * vmax, 0.8 * vmax * 15 / 1000, "Ti/V < 20 · arco"), (0.8 * vmax, 0.8 * vmax * 35 / 1000, "20–50 · MORB / retroarco"),
+              (0.8 * vmax, 0.8 * vmax * 75 / 1000, "> 50 · OIB / CFB")]
+    ann = [dict(x=x, y=y, text=t, showarrow=False, font=dict(size=9, color="#8A94A6"), xanchor="right") for x, y, t in campos]
+    for razao in (10, 20, 50, 100):
+        ann.append(dict(x=vmax, y=razao * vmax / 1000, text=str(razao), showarrow=False, font=dict(size=9, color="#8A94A6"),
+                        xanchor="left", yanchor="middle"))
+    fig.add_trace(trace_amostras(df, df["V_ppm"], df["Ti_ppm"] / 1000))
+    fig.update_layout(annotations=ann)
+    fig.update_xaxes(title_text="V (ppm)", range=[0, vmax])
+    fig.update_yaxes(title_text="Ti / 1000 (ppm)", range=[0, ymax])
+    return tema_grafico(fig, "Discriminação tectônica — Ti/V (Shervais, 1982)", altura=360,
+                        nota="linhas = razões Ti/V 10, 20, 50 e 100 · Ti = TiO₂ × 5990")
+
+
+def montar_harker(df, col, rotulo):
+    fig = go.Figure(trace_amostras(df, df["SiO2"], df[col]))
+    fig.update_xaxes(title_text="SiO₂ (% peso)")
+    fig.update_yaxes(title_text=f"{rotulo} (% peso)")
+    tema_grafico(fig, f"Harker — {rotulo} × SiO₂", altura=250)
+    fig.update_layout(margin=dict(l=48, r=10, t=36, b=42), title=dict(font=dict(size=12)))
+    return fig
+
+
+def montar_blocos_peate(registros_geoq):
+    """Devolve (lista de (div_id, fig), dict de secoes) pro HTML do dashboard."""
+    df = carregar_dados_peate(registros_geoq)
+    pont = pontuacao_peate(df)
+    figs = {}
+    for c in ORDEM_CRITERIOS:
+        figs[f"grafico-peate-{c.lower()}"] = montar_criterio_peate(df, c)
+    figs["grafico-matriz-alto"] = montar_matriz_conformidade(df, pont, "Alto-Ti")
+    figs["grafico-matriz-baixo"] = montar_matriz_conformidade(df, pont, "Baixo-Ti")
+    figs["grafico-etr"] = montar_etr(df)
+    figs["grafico-ti-v"] = montar_ti_v(df)
+    for col, rot in HARKER_Y:
+        figs[f"grafico-harker-{col.lower()}"] = montar_harker(df, col, rot)
+    print(f"  Peate/ETR/Ti-V/Harker: {len(df)} amostras, {len(figs)} gráficos")
+    return figs
 
 
 def main():
@@ -803,8 +819,6 @@ def main():
                                             "Sr", "Zr", "Y", "Ti_Zr", "Zr_Y", "amostra")}
             if g["classificacao_ti"] in MAPA_TI_GEOQ:
                 r["classificacao_ti"] = MAPA_TI_GEOQ[g["classificacao_ti"]]
-    geoq_alto = [r for r in registros_geoq if r["classificacao_ti"] == "Alto-Ti"]
-    geoq_baixo = [r for r in registros_geoq if r["classificacao_ti"] == "Baixo-Ti"]
 
     print("Carregando resumo dos corpos intrusivos (área + classificação)...")
     resumo_corpos = carregar_resumo_corpos(registros_geoq)
@@ -897,18 +911,7 @@ def main():
     fig_tas = montar_tas(pontos=registros_geoq)
     fig_afm = montar_afm(pontos=registros_geoq)
     fig_shand = montar_shand(pontos=registros_geoq)
-    fig_mgo_tio2 = montar_diagrama_campos(CAMPOS_MGO_TIO2, "MgO × TiO₂ (tipos de magma)", "MgO (% em peso)", "TiO₂ (% em peso)", [2, 10], [0.5, 4.8],
-                                           pontos=registros_geoq, x_key="MgO", y_key="TiO2")
-    fig_tiy_tizr = montar_diagrama_campos(CAMPOS_TIY_TIZR, "Ti/Y × Ti/Zr (tipos de magma)", "Ti/Y", "Ti/Zr", [100, 700], [30, 100],
-                                           pontos=registros_geoq, x_key="Ti_Y", y_key="Ti_Zr")
-    fig_fe2o3 = montar_diagrama_campos(CAMPOS_C_FE2O3_TIO2, "Fe₂O₃(t) × TiO₂ — grupo Alto-Ti", "TiO₂", "Fe₂O₃ (t)", [1, 5], [10, 19],
-                                        pontos=geoq_alto, x_key="TiO2", y_key="Fe2O3T")
-    fig_zry_sr = montar_diagrama_campos(CAMPOS_D_ZRY_SR, "Zr/Y × Sr — grupo Alto-Ti", "Sr", "Zr/Y", [0, 1200], [4, 10],
-                                         pontos=geoq_alto, x_key="Sr", y_key="Zr_Y")
-    fig_zry_tizr = montar_diagrama_campos(CAMPOS_E_ZRY_TIZR, "Zr/Y × Ti/Zr — grupo Baixo-Ti", "Ti/Zr", "Zr/Y", [30, 100], [3, 7],
-                                           pontos=geoq_baixo, x_key="Ti_Zr", y_key="Zr_Y")
-    fig_sr_tiy = montar_diagrama_campos(CAMPOS_F_SR_TIY, "Sr × Ti/Y — grupo Baixo-Ti", "Ti/Y", "Sr", [100, 600], [100, 400],
-                                         pontos=geoq_baixo, x_key="Ti_Y", y_key="Sr")
+    figs_peate = montar_blocos_peate(registros_geoq)
 
     # ------------------------------------------------------------
     # estatisticas do catalogo de campo (Taio)
@@ -941,12 +944,26 @@ def main():
     html_tas = pio.to_html(fig_tas, full_html=False, include_plotlyjs=True, div_id="grafico-tas", config={"responsive": True})
     html_afm = pio.to_html(fig_afm, full_html=False, include_plotlyjs=False, div_id="grafico-afm", config={"responsive": True})
     html_shand = pio.to_html(fig_shand, full_html=False, include_plotlyjs=False, div_id="grafico-shand", config={"responsive": True})
-    html_mgo_tio2 = pio.to_html(fig_mgo_tio2, full_html=False, include_plotlyjs=False, div_id="grafico-mgo-tio2", config={"responsive": True})
-    html_tiy_tizr = pio.to_html(fig_tiy_tizr, full_html=False, include_plotlyjs=False, div_id="grafico-tiy-tizr", config={"responsive": True})
-    html_fe2o3 = pio.to_html(fig_fe2o3, full_html=False, include_plotlyjs=False, div_id="grafico-fe2o3", config={"responsive": True})
-    html_zry_sr = pio.to_html(fig_zry_sr, full_html=False, include_plotlyjs=False, div_id="grafico-zry-sr", config={"responsive": True})
-    html_zry_tizr = pio.to_html(fig_zry_tizr, full_html=False, include_plotlyjs=False, div_id="grafico-zry-tizr", config={"responsive": True})
-    html_sr_tiy = pio.to_html(fig_sr_tiy, full_html=False, include_plotlyjs=False, div_id="grafico-sr-tiy", config={"responsive": True})
+    html_peate = {k: pio.to_html(f, full_html=False, include_plotlyjs=False, div_id=k, config={"responsive": True})
+                  for k, f in figs_peate.items()}
+
+    def cartoes(chaves):
+        return "".join(f'<div class="grafico-card">{html_peate[k]}</div>' for k in chaves)
+
+    legenda_tipos = "".join(f'<span><i style="background:{COR_TIPO[tp]}"></i>{tp}</span>' for tp in ORDEM_TIPOS)
+    secao_peate = (
+        '<h3 class="titulo-secao">Critérios de Peate et al. (1992) — 12 critérios</h3>'
+        f'<div class="legenda-tipos">{legenda_tipos}<em>faixas = janela de cada magma-tipo · pontos = amostras</em></div>'
+        f'<div class="grade-2">{cartoes([f"grafico-peate-{c.lower()}" for c in ORDEM_CRITERIOS])}</div>')
+    secao_matrizes = (
+        '<h3 class="titulo-secao">Matrizes de conformidade (Peate et al., 1992)</h3>'
+        + cartoes(["grafico-matriz-alto", "grafico-matriz-baixo"]))
+    secao_etr_tect = (
+        '<h3 class="titulo-secao">ETR e discriminação tectônica</h3>' + cartoes(["grafico-etr", "grafico-ti-v"]))
+    secao_harker = (
+        '<h3 class="titulo-secao">Diagramas de Harker</h3>'
+        f'<div class="grade-2">{cartoes([f"grafico-harker-{c.lower()}" for c, _ in HARKER_Y])}</div>')
+    ids_novos_js = ", ".join(f"document.getElementById('{k}')" for k in figs_peate)
     html_lito_taio = pio.to_html(fig_lito_taio, full_html=False, include_plotlyjs=False, div_id="grafico-lito-taio", config={"responsive": True})
     html_ti_taio = pio.to_html(fig_ti_taio, full_html=False, include_plotlyjs=False, div_id="grafico-ti-taio", config={"responsive": True})
 
@@ -1111,6 +1128,12 @@ def main():
   footer {{ text-align: center; padding: 8px; opacity: 0.55; font-size: 11px; }}
   #mapa-leaflet {{ flex: 1; }}
   .col-graficos {{ overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 12px; }}
+  .titulo-secao {{ margin: 8px 2px 0; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: {MARCA_ROXO}; flex-shrink: 0; }}
+  .legenda-tipos {{ display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; align-items: center; flex-shrink: 0; }}
+  .legenda-tipos i {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }}
+  .legenda-tipos em {{ opacity: .6; }}
+  .grade-2 {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; flex-shrink: 0; }}
+  .grade-2 .grafico-card {{ min-width: 0; overflow: hidden; }}
   .grafico-card {{ background: var(--painel); border: 1px solid var(--borda-fraca); border-left: 4px solid {MARCA_ROXO}; border-radius: 8px; flex-shrink: 0; }}
   .leaflet-popup-content-wrapper {{ background: {MARCA_ROXO_ESCURO}; color: {MARCA_CINZA_CLARO}; border: 1px solid {MARCA_ROXO}; }}
   .leaflet-popup-tip {{ background: {MARCA_ROXO_ESCURO}; }}
@@ -1182,12 +1205,10 @@ def main():
     <div class="grafico-card">{html_tas}</div>
     <div class="grafico-card">{html_afm}</div>
     <div class="grafico-card">{html_shand}</div>
-    <div class="grafico-card">{html_mgo_tio2}</div>
-    <div class="grafico-card">{html_tiy_tizr}</div>
-    <div class="grafico-card">{html_fe2o3}</div>
-    <div class="grafico-card">{html_zry_sr}</div>
-    <div class="grafico-card">{html_zry_tizr}</div>
-    <div class="grafico-card">{html_sr_tiy}</div>
+    {secao_peate}
+    {secao_matrizes}
+    {secao_etr_tect}
+    {secao_harker}
     <div class="grafico-card">{html_lito_taio}</div>
     <div class="grafico-card">{html_ti_taio}</div>
     <div class="grafico-card painel-estatico">
@@ -1220,10 +1241,8 @@ def main():
 
     var TODOS_GD = [
         document.getElementById('grafico-tas'), document.getElementById('grafico-afm'),
-        document.getElementById('grafico-shand'), document.getElementById('grafico-mgo-tio2'),
-        document.getElementById('grafico-tiy-tizr'), document.getElementById('grafico-fe2o3'),
-        document.getElementById('grafico-zry-sr'), document.getElementById('grafico-zry-tizr'),
-        document.getElementById('grafico-sr-tiy'),
+        document.getElementById('grafico-shand'),
+        {ids_novos_js},
         document.getElementById('grafico-lito-taio'), document.getElementById('grafico-ti-taio'),
     ];
 
