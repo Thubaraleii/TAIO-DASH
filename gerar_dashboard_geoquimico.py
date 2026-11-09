@@ -1518,6 +1518,9 @@ def main():
 </html>
 """
     OUT_HTML.write_text(html_final, encoding="utf-8")
+    sys.path.insert(0, str(Path(__file__).parent)) if 'sys' in globals() else __import__('sys').path.insert(0, str(Path(__file__).parent))
+    import tps_i18n  # botao de idioma (PT/EN) e volta ao hub
+    tps_i18n.injetar(OUT_HTML, hub=tps_i18n.HUB_ORIGINAL, acc="#9B6BFF", anchor=".lado-direito")
     print(f"Salvo em: {OUT_HTML}")
 
 

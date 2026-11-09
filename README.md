@@ -35,6 +35,12 @@ organizado em três colunas: lista de dados, gráficos e mapa.
 - Critérios e janelas de Peate et al. (1992) aplicados sem alteração; as amostras não são reclassificadas — o grupo Alto/Baixo-Ti vem da planilha.
 - Pontuação de conformidade: 1 ponto por critério (de 12) dentro da janela do magma-tipo.
 
+## Idioma e navegação
+
+- **Idioma:** o botão **EN / PT**, ao lado do logotipo, alterna a interface entre português e inglês em tempo real (menus, legendas, dicas, popups, rótulos e textos 3D). A escolha é lembrada no navegador e acompanha os links entre as páginas (`?lang=en`).
+- **Hub:** o botão **← Hub** volta à página inicial do projeto, mantendo o idioma.
+- **Tradução:** feita no navegador por dicionário (`tps_i18n_dict.py`, embutido na página por `tps_i18n.py` ao gerar o HTML). Dados de origem em português (por exemplo, descrições de campo e nomes próprios de unidades) permanecem no idioma original.
+
 ## Uso
 
 Abra `dashboard_geoquimico.html` no navegador (o mapa usa tiles online) ou acesse a versão publicada.
